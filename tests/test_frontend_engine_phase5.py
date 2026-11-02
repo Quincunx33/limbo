@@ -1,4 +1,5 @@
 import json
+import base64
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -135,10 +136,13 @@ const meta = import.meta.url;
             path = root / "entry.ts"
             path.write_text("const value: number = 1;", encoding="utf-8")
             adapter = EsbuildAdapter(root, executable="esbuild")
-            completed = SimpleNamespace(returncode=0, stdout="const value = 1;", stderr="")
+            map_data = base64.b64encode(b'{"version":3,"sources":["entry.ts"]}').decode("ascii")
+            emitted = "const value = 1;\\n//# sourceMappingURL=data:application/json;base64," + map_data
+            completed = SimpleNamespace(returncode=0, stdout=emitted, stderr="")
             with patch("limbo.frontend_engine.subprocess.run", return_value=completed) as run:
                 result = adapter.transform(path)
-            self.assertEqual(result.code, "const value = 1;")
+            self.assertEqual(result.code, emitted)
+            self.assertEqual(json.loads(result.source_map), {"version": 3, "sources": ["entry.ts"]})
             self.assertEqual(run.call_args.kwargs["input"], "const value: number = 1;")
             self.assertIn("--loader=ts", run.call_args.args[0])
             self.assertIn("--sourcemap=inline", run.call_args.args[0])
