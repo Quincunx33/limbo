@@ -9,6 +9,7 @@ from pathlib import Path
 
 from . import __version__
 from .frontend import FrontendCompiler
+from .config import ConfigError, load_config
 
 
 def _create(name: str) -> int:
@@ -50,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
     create = sub.add_parser("create", help="create a starter project"); create.add_argument("name")
     for command in ("dev", "start"):
         cmd = sub.add_parser(command, help=f"run the local app ({command})")
-        cmd.add_argument("--host", default="127.0.0.1"); cmd.add_argument("--port", type=int, default=8000)
+        cmd.add_argument("--host", default=None); cmd.add_argument("--port", type=int, default=None)
     sub.add_parser("doctor", help="inspect available optional tools")
     sub.add_parser("info", help="show Limbo version and core capability")
     sub.add_parser("dependencies", help="list optional integrations")
@@ -63,11 +64,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "create": return _create(args.name)
     if args.command in ("dev", "start"):
         try:
+            config = load_config()
             app = _load_app()
-            print(f"Limbo {__version__} serving on http://{args.host}:{args.port} (Ctrl+C to stop)")
-            app.run(host=args.host, port=args.port)
+            host = args.host if args.host is not None else config.server.get("host", "127.0.0.1")
+            port = args.port if args.port is not None else config.server.get("port", 8000)
+            print(f"Limbo {__version__} serving on http://{host}:{port} (Ctrl+C to stop)")
+            app.run(host=host, port=port)
             return 0
-        except (OSError, RuntimeError, TypeError) as exc:
+        except (OSError, RuntimeError, TypeError, ConfigError) as exc:
             print(f"Error: {exc}", file=sys.stderr); return 2
     if args.command == "info":
         print(f"Limbo {__version__}\nCore: Python standard library only\nHTTP server: built-in threaded TCP implementation")
@@ -76,7 +80,13 @@ def main(argv: list[str] | None = None) -> int:
         print("Required: none (Python standard library only)\nBuilt-in: SQLite, uploads, templates, auth primitives, WebSocket, local module resolver\nOptional frontend compilers: esbuild, @vue/compiler-sfc, svelte (detected by `limbo frontend doctor`)\nOptional tunnel: cloudflared integration not yet implemented")
         return 0
     if args.command == "doctor":
-        print(f"Python: {sys.version.split()[0]}\ncloudflared: {shutil.which('cloudflared') or 'not found (optional)'}\nNode.js: {shutil.which('node') or 'not found (optional)'}")
+        try:
+            config = load_config()
+        except ConfigError as exc:
+            print(f"Configuration: invalid ({exc})", file=sys.stderr)
+            return 2
+        status = "loaded " + str(config.path) if config.path else "defaults (no limbo.toml)"
+        print(f"Python: {sys.version.split()[0]}\nConfiguration: {status}\ncloudflared: {shutil.which('cloudflared') or 'not found (optional)'}\nNode.js: {shutil.which('node') or 'not found (optional)'}")
         return 0
     if args.command == "build":
         print("Production frontend builds are not implemented in Limbo 0.3.0; no build was run.", file=sys.stderr)
