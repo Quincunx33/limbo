@@ -103,6 +103,7 @@ class StreamingMultipartTests(unittest.TestCase):
         @app.post("/upload")
         def receive(request):
             self.assertEqual(b"".join(request.files["asset"][0].iter_chunks()), b"lifecycle-check")
+            self.assertEqual(request.form_value("note"), "hello")
             return {"ok": True}
 
         request = Request("POST", "/upload", {
