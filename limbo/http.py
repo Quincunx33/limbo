@@ -29,7 +29,7 @@ class Request:
         self._form_cache: dict[str, list[str]] | None = None
         self._cookies_cache: dict[str, str] | None = None
         self._multipart_cache: dict[str, list[Any]] | None = None
-        self._multipart_limits: dict[str, int] = {}
+        self._multipart_limits: dict[str, int] = {}\n        self._upload_tempdir = None\n\n    def close_uploads(self) -> None:\n        \"\"\"Remove request-scoped temporary upload files.\"\"\"\n        tempdir = self._upload_tempdir\n        self._upload_tempdir = None\n        if tempdir is not None:\n            tempdir.cleanup()
 
     @property
     def json(self) -> Any:
