@@ -52,15 +52,16 @@ class Request:
     def form(self) -> dict[str, list[str]]:
         if self._form_cache is None:
             if self.headers.get("content-type", "").lower().startswith("multipart/form-data"):
-                from .uploads import UploadFile, UploadLimitError, parse_multipart
-                try:
-                    self._multipart_cache = parse_multipart(
-                        self.headers["content-type"], self.body, **self._multipart_limits
-                    )
-                except UploadLimitError as exc:
-                    raise HTTPError(413, str(exc)) from exc
-                except ValueError as exc:
-                    raise HTTPError(400, "Malformed multipart body") from exc
+                if self._multipart_cache is None:
+                    from .uploads import UploadLimitError, parse_multipart
+                    try:
+                        self._multipart_cache = parse_multipart(
+                            self.headers["content-type"], self.body, **self._multipart_limits
+                        )
+                    except UploadLimitError as exc:
+                        raise HTTPError(413, str(exc)) from exc
+                    except ValueError as exc:
+                        raise HTTPError(400, "Malformed multipart body") from exc
                 self._form_cache = {key: [item for item in items if isinstance(item, str)]
                                     for key, items in self._multipart_cache.items()}
             else:
