@@ -57,6 +57,9 @@ jobs:
         run: |
           python -m unittest discover -s tests -p "test_*phase3.py" -v
           python -m unittest discover -s tests -p "test_streaming_uploads.py" -v
+      - name: Run Phase 5 frontend adapter contract tests
+        shell: bash
+        run: python -m unittest discover -s tests -p "test_frontend_engine_phase5.py" -v
       - name: Run Phase 4 configuration and CLI tests
         shell: bash
         run: |
