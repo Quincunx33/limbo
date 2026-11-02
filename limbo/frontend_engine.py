@@ -6,6 +6,8 @@ module never installs packages or downloads executables.
 from __future__ import annotations
 
 import json
+import base64
+import re
 import shutil
 import subprocess
 from dataclasses import asdict, dataclass
@@ -129,7 +131,14 @@ class EsbuildAdapter:
             raise AdapterError(f"esbuild could not compile {path.name}: {exc}") from exc
         if result.returncode:
             raise AdapterError(result.stderr.strip() or f"esbuild exited with status {result.returncode}")
-        return TransformResult(code=result.stdout, loader="js")
+        source_map = None
+        match = re.search(r"sourceMappingURL=data:application/json;base64,([A-Za-z0-9+/=]+)", result.stdout)
+        if match:
+            try:
+                source_map = base64.b64decode(match.group(1), validate=True).decode("utf-8")
+            except (ValueError, UnicodeError):
+                raise AdapterError("esbuild returned an invalid inline source map")
+        return TransformResult(code=result.stdout, loader="js", source_map=source_map)
 
 
 class FrameworkSFCAdapter:
