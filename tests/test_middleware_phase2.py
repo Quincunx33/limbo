@@ -1,0 +1,102 @@
+import unittest
+
+from limbo import Limbo, Request, Response, access_log, cors, rate_limit, request_id, security_headers
+
+
+class RequestNegotiationTests(unittest.TestCase):
+    def test_accept_quality_and_specificity(self):
+        request = Request("GET", "/", {"accept": "text/*;q=1, text/html;q=0, application/json;q=0.8"})
+        self.assertFalse(request.accepts("text/html"))
+        self.assertTrue(request.accepts("text/plain"))
+        self.assertTrue(request.accepts("application/json"))
+        self.assertFalse(request.accepts("image/png"))
+
+    def test_response_redirect_and_vary_helpers(self):
+        response = Response.redirect("/login", 302)
+        self.assertEqual(response.status, 302)
+        self.assertEqual(response.headers["Location"], "/login")
+        with self.assertRaises(ValueError):
+            Response.redirect("/bad\r\nLocation: https://evil.example")
+        response.add_vary("Origin").add_vary("Accept", "origin")
+        self.assertEqual(response.headers["Vary"], "Origin, Accept")
+
+
+class MiddlewareTests(unittest.TestCase):
+    def test_cors_exact_origin_and_preflight(self):
+        app = Limbo()
+        app.middleware(cors(allow_origins=("https://app.example",),
+                            allow_methods=("GET", "POST"),
+                            allow_headers=("X-Token",),
+                            allow_credentials=True, max_age=300))
+        @app.get("/data")
+        def data(req):
+            return Response.json({"ok": True})
+        response = app.dispatch(Request("GET", "/data", {"origin": "https://app.example"}))
+        self.assertEqual(response.headers["Access-Control-Allow-Origin"], "https://app.example")
+        self.assertEqual(response.headers["Access-Control-Allow-Credentials"], "true")
+        self.assertIn("Origin", response.headers["Vary"])
+        preflight = app.dispatch(Request("OPTIONS", "/data", {
+            "origin": "https://app.example",
+            "access-control-request-method": "POST",
+            "access-control-request-headers": "x-token",
+        }))
+        self.assertEqual(preflight.status, 204)
+        self.assertEqual(preflight.headers["Access-Control-Max-Age"], "300")
+        denied = app.dispatch(Request("GET", "/data", {"origin": "https://evil.example"}))
+        self.assertNotIn("Access-Control-Allow-Origin", denied.headers)
+
+    def test_cors_rejects_unsafe_configuration_and_disallowed_preflight(self):
+        with self.assertRaises(ValueError):
+            cors(allow_origins=("*",), allow_credentials=True)
+        with self.assertRaises(ValueError):
+            cors(allow_origins=("https://example.com:99999",))
+        app = Limbo()
+        app.middleware(cors(allow_origins=("https://app.example",), allow_headers=("X-Allowed",)))
+        response = app.dispatch(Request("OPTIONS", "/missing", {
+            "origin": "https://app.example",
+            "access-control-request-method": "POST",
+            "access-control-request-headers": "x-forbidden",
+        }))
+        self.assertEqual(response.status, 403)
+
+    def test_security_headers_do_not_override_application_policy(self):
+        app = Limbo()
+        app.middleware(security_headers(content_security_policy="default-src 'self'"))
+        @app.get("/")
+        def home(req):
+            return Response("ok", headers={"X-Frame-Options": "SAMEORIGIN"})
+        response = app.dispatch(Request("GET", "/", {}))
+        self.assertEqual(response.headers["X-Frame-Options"], "SAMEORIGIN")
+        self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(response.headers["Content-Security-Policy"], "default-src 'self'")
+
+    def test_request_id_validation_and_access_log_sink(self):
+        records = []
+        app = Limbo()
+        app.middleware(request_id())
+        app.middleware(access_log(sink=records.append))
+        @app.get("/")
+        def home(req):
+            return {"id": req.state["request_id"]}
+        response = app.dispatch(Request("GET", "/", {"x-request-id": "client-123"}))
+        self.assertEqual(response.headers["X-Request-ID"], "client-123")
+        self.assertEqual(records[0]["request_id"], "client-123")
+        invalid = app.dispatch(Request("GET", "/", {"x-request-id": "bad\r\nvalue"}))
+        self.assertNotEqual(invalid.headers["X-Request-ID"], "bad\r\nvalue")
+        self.assertLessEqual(len(invalid.headers["X-Request-ID"]), 128)
+        self.assertEqual(len(records), 2)
+
+    def test_rate_limit_is_bounded_and_returns_retry_after(self):
+        limiter = rate_limit(capacity=1, refill_rate=0.01, max_keys=2)
+        request = Request("GET", "/", {}, client=("192.0.2.1", 1234))
+        first = limiter(request, lambda req: Response.text("ok"))
+        second = limiter(request, lambda req: Response.text("ok"))
+        self.assertEqual(first.status, 200)
+        self.assertEqual(second.status, 429)
+        self.assertIn("Retry-After", second.headers)
+        with self.assertRaises(ValueError):
+            rate_limit(capacity=0)
+
+
+if __name__ == "__main__":
+    unittest.main()
