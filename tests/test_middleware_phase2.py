@@ -60,6 +60,19 @@ class MiddlewareTests(unittest.TestCase):
         }))
         self.assertEqual(response.status, 403)
 
+    def test_cors_denials_also_vary_by_origin_and_validate_requested_headers(self):
+        middleware = cors(allow_origins=("https://app.example",), allow_headers=("X-Allowed",))
+        denied_origin = middleware(Request("GET", "/", {"origin": "https://evil.example"}),
+                                   lambda req: Response.text("ok"))
+        self.assertIn("Origin", denied_origin.headers["Vary"])
+        bad_header = middleware(Request("OPTIONS", "/", {
+            "origin": "https://app.example",
+            "access-control-request-method": "GET",
+            "access-control-request-headers": "X-Allowed, bad header",
+        }), lambda req: Response.text("unused"))
+        self.assertEqual(bad_header.status, 403)
+        self.assertIn("Origin", bad_header.headers["Vary"])
+
     def test_security_headers_do_not_override_application_policy(self):
         app = Limbo()
         app.middleware(security_headers(content_security_policy="default-src 'self'"))

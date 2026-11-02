@@ -56,31 +56,32 @@ def cors(*, allow_origins: tuple[str, ...] | list[str] = ("*",),
         preflight = request.method == "OPTIONS" and "access-control-request-method" in request.headers
         if preflight:
             requested_method = request.headers["access-control-request-method"].upper()
-            if not allowed or requested_method not in methods:
-                return Response(b"", 403)
             requested_headers = [item.strip().lower() for item in
                                  request.headers.get("access-control-request-headers", "").split(",") if item.strip()]
+            valid_header_names = all(token.fullmatch(item) for item in requested_headers)
             allowed_headers = {item.lower() for item in headers}
-            if requested_headers and ("*" not in allowed_headers and
-                                      any(item not in allowed_headers for item in requested_headers)):
-                return Response(b"", 403)
-            response = Response(b"", 204, {
-                "Access-Control-Allow-Methods": ", ".join(methods),
-            })
-            if headers:
-                response.headers["Access-Control-Allow-Headers"] = ", ".join(headers)
-            if max_age is not None:
-                response.headers["Access-Control-Max-Age"] = str(max_age)
+            headers_allowed = (not requested_headers or "*" in allowed_headers or
+                               all(item in allowed_headers for item in requested_headers))
+            if not allowed or requested_method not in methods or not valid_header_names or not headers_allowed:
+                response = Response(b"", 403)
+            else:
+                response = Response(b"", 204, {
+                    "Access-Control-Allow-Methods": ", ".join(methods),
+                })
+                if headers:
+                    response.headers["Access-Control-Allow-Headers"] = ", ".join(headers)
+                if max_age is not None:
+                    response.headers["Access-Control-Max-Age"] = str(max_age)
         else:
             response = next_handler(request)
+        if "*" not in origins:
+            _merge_vary(response, "Origin")
         if allowed:
             response.headers["Access-Control-Allow-Origin"] = "*" if "*" in origins else origin
             if allow_credentials:
                 response.headers["Access-Control-Allow-Credentials"] = "true"
             if exposed:
                 response.headers["Access-Control-Expose-Headers"] = ", ".join(exposed)
-            if "*" not in origins:
-                _merge_vary(response, "Origin")
         return response
     return middleware
 
