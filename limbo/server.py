@@ -407,7 +407,7 @@ class LimboServer:
         chunked = stream_body and not no_body and headers.get("transfer-encoding", "").lower() == "chunked"
         if stream_body and not no_body and expected is None and not chunked and protocol_version == "HTTP/1.1":
             headers["transfer-encoding"] = "chunked"; chunked = True
-        head = f"{protocol_version} {status} {phrase}\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers.items()) + "\r\n"
+        head = f"{protocol_version} {status} {phrase}\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers.items()) + "".join(f"set-cookie: {cookie}\r\n" for cookie in response.cookies) + "\r\n"
         conn.sendall(head.encode("latin-1", "strict"))
         if no_body: return
         if not stream_body:
