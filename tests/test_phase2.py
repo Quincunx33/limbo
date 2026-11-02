@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from limbo import (Database, Limbo, Request, Response, SessionSigner, UploadFile,
@@ -291,6 +292,11 @@ class HTTPCompletionTests(unittest.TestCase):
         self.assertEqual(app.dispatch(Request("GET", "/missing", {})).status, 404)
         self.assertEqual(app.dispatch(Request("GET", "/missing", {})).body, b'{"custom":true}')
 
+    def test_app_run_passes_trusted_host_policy_to_server(self):
+        app = Limbo()
+        with patch("limbo.app.LimboServer") as server_class:
+            app.run(trusted_hosts=("localhost",))
+        self.assertEqual(server_class.call_args.kwargs["trusted_hosts"], ("localhost",))
     def test_exception_class_handler(self):
         app = Limbo()
         @app.get("/boom")
