@@ -2,10 +2,12 @@
 from .app import Limbo
 from .http import HTTPError, Request, Response
 from .database import Database
+from .frontend import DependencyGraph, FrontendCompiler, FrontendDevServer, FrontendError, ModuleResolver
 from .security import SessionSigner, hash_password, session_cookie, verify_password
 from .templates import TemplateEngine
 from .uploads import UploadFile
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = ["Limbo", "Request", "Response", "HTTPError", "Database", "SessionSigner",
-           "TemplateEngine", "UploadFile", "hash_password", "verify_password", "session_cookie", "__version__"]
+           "TemplateEngine", "UploadFile", "DependencyGraph", "FrontendCompiler", "FrontendDevServer",
+           "FrontendError", "ModuleResolver", "hash_password", "verify_password", "session_cookie", "__version__"]

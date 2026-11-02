@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "limbo-framework"
-version = "0.2.0"
+version = "0.3.0"
 description = "A Python-first, zero-dependency web framework foundation"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -18,3 +18,6 @@ limbo = "limbo.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["limbo*"]
+
+[tool.setuptools.package-data]
+limbo = ["*.cjs"]

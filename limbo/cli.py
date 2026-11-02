@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .frontend import FrontendCompiler
 
 
 def _create(name: str) -> int:
@@ -16,9 +17,10 @@ def _create(name: str) -> int:
         print(f"Error: {target} already exists and is not empty.", file=sys.stderr)
         return 2
     target.mkdir(parents=True, exist_ok=True)
-    for folder in ("static", "templates", "uploads", "tests"):
-        (target / folder).mkdir(exist_ok=True)
-    (target / "app.py").write_text('''from limbo import Limbo\n\napp = Limbo(name="My Limbo app")\n\n@app.get("/")\ndef home(req):\n    return app.html("<h1>Hello from Limbo</h1><p>Your app is running.</p>")\n\n@app.get("/api/health")\ndef health(req):\n    return {"ok": True}\n\napp.static("/static", "static")\n\nif __name__ == "__main__":\n    app.run()\n''', encoding="utf-8")
+    for folder in ("static", "templates", "uploads", "tests", "frontend/src", "frontend/public"):
+        (target / folder).mkdir(parents=True, exist_ok=True)
+    (target / "frontend" / "src" / "main.js").write_text('''const root = document.querySelector("#app");\nroot.textContent = "Frontend modules are served locally by Limbo.";\n''', encoding="utf-8")
+    (target / "app.py").write_text('''from limbo import Limbo\n\napp = Limbo(name="My Limbo app")\napp.enable_frontend("frontend")\n\n@app.get("/")\ndef home(req):\n    tags = app.frontend_script("src/main.js")\n    return app.html("<!doctype html><html><head><meta charset='utf-8'><title>Limbo</title></head>"\n                    "<body><h1>Hello from Limbo</h1><div id='app'>Loading…</div>" + tags + "</body></html>")\n\n@app.get("/api/health")\ndef health(req):\n    return {"ok": True}\n\napp.static("/static", "static")\n\nif __name__ == "__main__":\n    app.run()\n''', encoding="utf-8")
     (target / "limbo.toml").write_text('[app]\nname = "My Limbo app"\nhost = "127.0.0.1"\nport = 8000\ndebug = true\n', encoding="utf-8")
     (target / "requirements.txt").write_text("# Limbo core has no third-party dependencies.\n", encoding="utf-8")
     (target / "README.md").write_text(f"# {target.name}\n\nRun `python app.py` from this directory.\n", encoding="utf-8")
@@ -53,6 +55,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("info", help="show Limbo version and core capability")
     sub.add_parser("dependencies", help="list optional integrations")
     sub.add_parser("build", help="explain current build support")
+    frontend = sub.add_parser("frontend", help="inspect local frontend compiler integrations")
+    frontend_sub = frontend.add_subparsers(dest="frontend_command", required=True)
+    frontend_doctor = frontend_sub.add_parser("doctor", help="inspect optional frontend tools")
+    frontend_doctor.add_argument("directory", nargs="?", default=".")
     args = parser.parse_args(argv)
     if args.command == "create": return _create(args.name)
     if args.command in ("dev", "start"):
@@ -67,14 +73,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Limbo {__version__}\nCore: Python standard library only\nHTTP server: built-in threaded TCP implementation")
         return 0
     if args.command == "dependencies":
-        print("Required: none (Python standard library only)\nBuilt-in: SQLite, multipart uploads, escaped templates, scrypt password hashing, signed sessions, WebSocket\nOptional compiler integrations: not yet implemented\nOptional tunnel: cloudflared integration not yet implemented")
+        print("Required: none (Python standard library only)\nBuilt-in: SQLite, uploads, templates, auth primitives, WebSocket, local module resolver\nOptional frontend compilers: esbuild, @vue/compiler-sfc, svelte (detected by `limbo frontend doctor`)\nOptional tunnel: cloudflared integration not yet implemented")
         return 0
     if args.command == "doctor":
         print(f"Python: {sys.version.split()[0]}\ncloudflared: {shutil.which('cloudflared') or 'not found (optional)'}\nNode.js: {shutil.which('node') or 'not found (optional)'}")
         return 0
     if args.command == "build":
-        print("Production frontend builds are not implemented in Limbo 0.1.0; no build was run.", file=sys.stderr)
+        print("Production frontend builds are not implemented in Limbo 0.3.0; no build was run.", file=sys.stderr)
         return 2
+    if args.command == "frontend" and args.frontend_command == "doctor":
+        try:
+            capabilities = FrontendCompiler(args.directory).doctor()
+        except (OSError, ValueError) as exc:
+            print(f"Error: {exc}", file=sys.stderr); return 2
+        for name, path in capabilities.items():
+            print(f"{name}: {path or 'not installed (optional)'}")
+        return 0
     return 0
 
 

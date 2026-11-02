@@ -1,8 +1,8 @@
 # Limbo
 
-**An experimental, Python-first web framework foundation.** The core package has no runtime third-party dependencies and contains a threaded HTTP/1.1 server implemented with Python sockets. Current package version: 0.2.0.
+**An experimental, Python-first web framework foundation.** The core package has no runtime third-party dependencies and contains a threaded HTTP/1.1 server implemented with Python sockets. Current package version: 0.3.0.
 
-> Limbo 0.1.0 is an early, experimental foundation—not the universal full-stack framework described in the original project brief. Do not expose it to untrusted public traffic without an independent security review.
+> Limbo 0.3.0 is an early, experimental foundation—not the universal full-stack framework described in the original project brief. Do not expose it to untrusted public traffic without an independent security review.
 
 ## Quick start
 
@@ -42,11 +42,31 @@ app.run(port=8000)
 - Escaped `string.Template` HTML rendering, multipart fields and upload objects with non-overwriting save, streamed file responses, and a small serialized-connection SQLite helper with rollback-capable transactions.
 - Password hashing with `hashlib.scrypt`, constant-time verification, HMAC-signed expiring stateless sessions, and secure cookie formatting helpers.
 - Basic RFC 6455 WebSocket upgrade, masked client frame validation, text/binary messages, continuation frames, ping/pong, close handling, and message-size limits.
+- Local frontend module preview with safe project-contained resolution, `tsconfig.json` path aliases, package `exports`/`imports` conditional resolution, browser import maps, dependency graph traversal and invalidation. Hidden files and unapproved asset types are not served.
+- Optional esbuild transform for TypeScript/JSX/TSX; optional Vue SFC and Svelte SFC compilers run locally through Node.js. Vue/Svelte outputs are served as modules with generated styles attached. Tools are detected, never installed by Limbo.
 - `limbo create`, `dev`, `start`, `doctor`, `info`, `dependencies`; an explicit not-implemented response for `build`.
+
+## Frontend preview
+
+The project generator includes a dependency-free browser module example. For a custom project:
+
+```python
+app.enable_frontend("frontend")
+
+@app.get("/")
+def home(req):
+    return app.html("<div id='app'></div>" + app.frontend_script("src/main.js"))
+```
+
+The import map is emitted before the module entry. `limbo frontend doctor [directory]` inspects optional tools. To transform TypeScript/JSX/TSX, install esbuild in the *frontend project* yourself, for example `npm install --save-dev esbuild`. Vue SFC compilation needs `vue` plus `@vue/compiler-sfc`; Svelte SFC compilation needs `svelte`. Limbo does not run npm or fetch compilers for you. The base server may be used without Node.js for browser-native JavaScript modules.
+
+There is a Vue sample in `examples/frontend/`. From the repository root, install the sample’s optional modules with `cd examples/frontend && npm install`, return to the repository root, then run `python examples/frontend_app.py` and open `http://127.0.0.1:8000`.
+
+Framework adapters are intentionally partial: React TSX syntax can be transformed, but the current React CommonJS runtime package is **not** browser-module served; the adapter returns an explicit diagnostic instead of claiming the app runs. Vue/Svelte compiler output and ESM runtime module graphs have been exercised, but these adapters are experimental and do not claim general production compatibility. The dependency scanner follows literal ESM imports; computed dynamic imports, CSS module imports, and general CSS import graphs are not yet resolved. There is no HMR or persistent compiler cache in this wave.
 
 ## Not implemented (do not assume support)
 
-Frontend compilation or React/Vue/Svelte adapters, HMR, production build optimization, full standards-compliant proxy/host validation, CSRF protection, an integrated login/authorization system, database migrations/pooling, configuration loading from TOML, Cloudflare Tunnel management, SSR runtimes, route groups, and named tunnel lifecycle are not implemented. WebSockets do not support extensions/compression or application-level Origin policy; configure an allowlist in application code before exposing a WebSocket endpoint. Node.js and cloudflared are not used or downloaded. `limbo dev --public` is not available.
+Full React runtime integration, HMR, persistent compiler caching, CSS modules, general CSS import processing, production build optimization, code splitting, framework SSR, full standards-compliant proxy/host validation, CSRF protection, an integrated login/authorization system, database migrations/pooling, configuration loading from TOML, Cloudflare Tunnel management, route groups, and named tunnel lifecycle are not implemented. WebSockets do not support extensions/compression or application-level Origin policy; configure an allowlist in application code before exposing a WebSocket endpoint. Node.js and cloudflared are not used or downloaded by the core. `limbo dev --public` is not available.
 
 ## Tests
 

@@ -1,0 +1,76 @@
+"use strict";
+const fs = require("node:fs");
+const path = require("node:path");
+const crypto = require("node:crypto");
+const { createRequire } = require("node:module");
+
+const sourcePath = path.resolve(process.argv[2]);
+const source = fs.readFileSync(sourcePath, "utf8");
+const projectRequire = createRequire(path.join(process.cwd(), "package.json"));
+const framework = path.extname(sourcePath).toLowerCase();
+
+function injectStyles(code, styles, id) {
+  if (!styles.length) return code;
+  const css = JSON.stringify(styles.join("\n"));
+  const elementId = JSON.stringify(`limbo-style-${id}`);
+  return `${code}\n;(()=>{if(typeof document==="undefined")return;let e=document.getElementById(${elementId});if(!e){e=document.createElement("style");e.id=${elementId};document.head.appendChild(e)}e.textContent=${css}})();\n`;
+}
+
+if (framework === ".vue") {
+  const { parse, compileScript, compileTemplate, compileStyle } = projectRequire("@vue/compiler-sfc");
+  const id = crypto.createHash("sha1").update(sourcePath).digest("hex").slice(0, 8);
+  const parsed = parse(source, { filename: sourcePath });
+  if (parsed.errors.length) throw parsed.errors[0];
+  const descriptor = parsed.descriptor;
+  const scoped = descriptor.styles.some((style) => style.scoped);
+  const scopeId = `data-v-${id}`;
+  let code;
+  if (descriptor.scriptSetup) {
+    code = compileScript(descriptor, {
+      id,
+      inlineTemplate: true,
+      templateOptions: { scoped, compilerOptions: scoped ? { scopeId } : {} },
+    }).content;
+    if (scoped) {
+      code = code.replace(/export\s+default\s+/, "const __limbo_sfc__ = ") +
+        `\n__limbo_sfc__.__scopeId=${JSON.stringify(scopeId)};\nexport default __limbo_sfc__;`;
+    }
+  } else {
+    let script = descriptor.script ? descriptor.script.content : "const __sfc__ = {};";
+    if (/export\s+default\s+/.test(script)) {
+      script = script.replace(/export\s+default\s+/, "const __sfc__ = ");
+    }
+    const template = descriptor.template
+      ? compileTemplate({
+          source: descriptor.template.content,
+          filename: sourcePath,
+          id,
+          scoped,
+          compilerOptions: scoped ? { scopeId } : {},
+        })
+      : { code: "export function render(){return null}", errors: [] };
+    if (template.errors.length) throw template.errors[0];
+    const scopedSetup = scoped ? `__sfc__.__scopeId=${JSON.stringify(scopeId)};` : "";
+    code = `${script}\n${template.code}\nif(typeof __sfc__!=="undefined"){__sfc__.render=render;${scopedSetup}}\nexport default typeof __sfc__!=="undefined"?__sfc__:{render};`;
+  }
+  const styles = descriptor.styles.map((style) => {
+    if (style.module) throw new Error("Vue CSS modules are not supported by this preview adapter yet");
+    const result = compileStyle({
+      source: style.content,
+      filename: sourcePath,
+      id: scopeId,
+      scoped: style.scoped,
+      preprocessLang: style.lang,
+    });
+    if (result.errors.length) throw result.errors[0];
+    return result.code;
+  });
+  process.stdout.write(injectStyles(code, styles, id));
+} else if (framework === ".svelte") {
+  const { compile } = projectRequire("svelte/compiler");
+  const result = compile(source, { filename: sourcePath, generate: "client", dev: true });
+  const styles = result.css?.code ? [result.css.code] : [];
+  process.stdout.write(injectStyles(result.js.code, styles, crypto.createHash("sha1").update(sourcePath).digest("hex").slice(0, 8)));
+} else {
+  throw new Error(`Unsupported single-file component: ${framework}`);
+}

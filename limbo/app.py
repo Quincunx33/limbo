@@ -9,6 +9,7 @@ from typing import Callable
 from urllib.parse import unquote
 
 from .http import HTTPError, Request, Response
+from .frontend import FrontendDevServer
 from .router import Router
 from .router import compile_path
 from .server import LimboServer
@@ -23,6 +24,7 @@ class Limbo:
         self.static_mounts: list[tuple[str, Path]] = []
         self.websocket_routes: list[tuple[object, Callable]] = []
         self.templates = TemplateEngine()
+        self.frontend_servers: list[FrontendDevServer] = []
         self.max_body_bytes = max_body_bytes
 
     def route(self, path: str, methods: tuple[str, ...] = ("GET",), *, name: str | None = None):
@@ -52,6 +54,20 @@ class Limbo:
 
     def template_directory(self, directory: str | os.PathLike[str]) -> None:
         self.templates = TemplateEngine(directory)
+
+    def enable_frontend(self, directory: str | os.PathLike[str], *, url_prefix: str = "/__limbo") -> FrontendDevServer:
+        frontend = FrontendDevServer(directory, url_prefix=url_prefix)
+        if any(existing.prefix == frontend.prefix for existing in self.frontend_servers):
+            raise ValueError(f"Frontend URL prefix already mounted: {frontend.prefix}")
+        self.frontend_servers.append(frontend)
+        return frontend
+
+    def frontend_script(self, entry: str, *, mount: int = 0) -> str:
+        try:
+            frontend = self.frontend_servers[mount]
+        except IndexError as exc:
+            raise ValueError("Enable a frontend directory before requesting its script tag") from exc
+        return frontend.script_tag(entry)
 
     def dispatch_websocket(self, request: Request, websocket) -> None:
         for pattern, handler in self.websocket_routes:
@@ -123,6 +139,9 @@ class Limbo:
                 for prefix, root in self.static_mounts:
                     if req.path == prefix or req.path.startswith(prefix + "/"):
                         return self._serve_static(req, prefix, root)
+                for frontend in self.frontend_servers:
+                    if req.path == frontend.prefix or req.path.startswith(frontend.prefix + "/"):
+                        return frontend.serve(req)
                 if allowed:
                     return Response.text("Method Not Allowed", 405, {"Allow": ", ".join(sorted(allowed | {"OPTIONS"}))})
                 return Response.text("Not Found", 404)
