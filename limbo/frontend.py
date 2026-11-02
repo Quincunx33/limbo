@@ -384,7 +384,7 @@ class FrontendCompiler:
             return source
         loader = {".ts": "ts", ".tsx": "tsx", ".jsx": "jsx", ".json": "json"}.get(suffix)
         if loader in ("ts", "tsx", "jsx"):
-            adapter = EsbuildAdapter(self.root, executable=self.esbuild)
+            adapter = EsbuildAdapter(self.root, executable=self.esbuild, jsx_import_source=jsx_import_source)
             try:
                 return adapter.transform(source_path).code
             except AdapterError as exc:
