@@ -15,6 +15,7 @@ class Route:
     handler: Callable
     name: str | None = None
     priority: int = 0
+    middleware: tuple[Callable, ...] = ()
 
 
 def compile_path(path: str) -> re.Pattern[str]:
@@ -56,7 +57,7 @@ class Router:
         self.routes: list[Route] = []
 
     def add(self, method: str, path: str, handler: Callable, name: str | None = None,
-            priority: int = 0) -> None:
+            priority: int = 0, middleware: tuple[Callable, ...] = ()) -> None:
         method = method.upper()
         if not re.fullmatch(r"[A-Z]+", method):
             raise ValueError("Invalid HTTP method")
@@ -70,7 +71,7 @@ class Router:
                 raise ValueError(f"Conflicting route: {method} {path} conflicts with {route.path}")
             if name and route.name == name and route.path != path:
                 raise ValueError(f"Route name already used for another path: {name}")
-        self.routes.append(Route(method, path, pattern, handler, name, priority))
+        self.routes.append(Route(method, path, pattern, handler, name, priority, tuple(middleware)))
 
     def match(self, method: str, path: str) -> tuple[Route | None, dict[str, str], set[str]]:
         allowed: set[str] = set()
@@ -145,12 +146,12 @@ class RouteGroup:
         return f"{self.name}.{name}" if self.name else name
 
     def route(self, path: str, methods: tuple[str, ...] = ("GET",), *,
-              name: str | None = None, priority: int = 0):
+              name: str | None = None, priority: int = 0, middleware: tuple[Callable, ...] = ()):
         full_path, full_name = self._path(path), self._name(name)
 
         def decorate(handler):
             for method in methods:
-                self.router.add(method, full_path, handler, name=full_name, priority=priority)
+                self.router.add(method, full_path, handler, name=full_name, priority=priority, middleware=middleware)
             return handler
         return decorate
 

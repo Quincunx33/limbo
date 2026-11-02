@@ -215,3 +215,90 @@ class HTTPParserSecurityTests(unittest.TestCase):
             LimboServer(lambda request: Response.text("ok"), max_header_count=0)
 
 
+
+class HTTPCompletionTests(unittest.TestCase):
+    def setUp(self):
+        self.server = LimboServer(lambda request: Response.text("ok"), max_header_bytes=4096)
+
+    def parse(self, raw, trusted_hosts=None):
+        server = LimboServer(lambda request: Response.text("ok"), max_header_bytes=4096, trusted_hosts=trusted_hosts)
+        return server._read_request(io.BytesIO(raw), ("127.0.0.1", 1234))
+
+    def test_host_authority_validation_and_allowlist(self):
+        valid = self.parse(b"GET / HTTP/1.1\\r\\nHost: localhost:8080\\r\\n\\r\\n", ["localhost"])
+        self.assertEqual(valid.host, "localhost:8080")
+        for host in (b"user@localhost", b"localhost/path", b"localhost:99999", b"bad host", b"-invalid.example"):
+            with self.subTest(host=host):
+                with self.assertRaises(HTTPError):
+                    self.parse(b"GET / HTTP/1.1\\r\\nHost: " + host + b"\\r\\n\\r\\n")
+        with self.assertRaises(HTTPError):
+            self.parse(b"GET / HTTP/1.1\\r\\nHost: evil.example\\r\\n\\r\\n", ["localhost"])
+
+    def test_deadline_rejects_slow_drip_header(self):
+        left, right = socket.socketpair()
+        stream = left.makefile("rb")
+        try:
+            left.settimeout(1)
+            right.sendall(b"GET / HTTP/1.1\\r\\nHost:")
+            started = time.monotonic()
+            with self.assertRaises((TimeoutError, OSError)):
+                self.server._read_request(stream, ("127.0.0.1", 1), deadline=time.monotonic() + 0.05)
+            self.assertLess(time.monotonic() - started, 0.5)
+        finally:
+            stream.close(); left.close(); right.close()
+
+    def test_response_framing_rejects_conflicts_and_wrong_lengths(self):
+        for response in (
+            Response(b"x", 200, {"Content-Length": "2"}),
+            Response(iter([b"x"]), 200, {"Content-Length": "1", "Transfer-Encoding": "chunked"}),
+            Response(iter([b"x"]), 200, {"Content-Length": "2"}),
+            Response(iter([b"xx"]), 200, {"Content-Length": "1"}),
+        ):
+            left, right = socket.socketpair()
+            try:
+                with self.assertRaises(ValueError):
+                    self.server._write_response(left, response, "GET", False)
+            finally:
+                left.close(); right.close()
+
+    def test_streaming_response_uses_valid_chunked_framing(self):
+        left, right = socket.socketpair()
+        try:
+            self.server._write_response(left, Response(iter([b"abc", b"de"])), "GET", False)
+            data = right.recv(4096)
+            self.assertIn(b"transfer-encoding: chunked", data.lower())
+            self.assertTrue(data.endswith(b"3\\r\\nabc\\r\\n2\\r\\nde\\r\\n0\\r\\n\\r\\n"))
+        finally:
+            left.close(); right.close()
+
+    def test_route_middleware_and_custom_error_handlers(self):
+        app = Limbo()
+        calls = []
+        def auth(req, next_handler):
+            calls.append("before")
+            result = next_handler(req)
+            calls.append("after")
+            return result
+        @app.get("/private", middleware=(auth,))
+        def private(req):
+            calls.append("handler")
+            return "secret"
+        self.assertEqual(app.dispatch(Request("GET", "/private", {})).body, b"secret")
+        self.assertEqual(calls, ["before", "handler", "after"])
+        @app.exception_handler(404)
+        def missing(error):
+            return Response.json({"custom": True}, 404)
+        self.assertEqual(app.dispatch(Request("GET", "/missing", {})).status, 404)
+        self.assertEqual(app.dispatch(Request("GET", "/missing", {})).body, b'{"custom":true}')
+
+    def test_exception_class_handler(self):
+        app = Limbo()
+        @app.get("/boom")
+        def boom(req):
+            raise LookupError("missing record")
+        @app.exception_handler(LookupError)
+        def lookup(error):
+            return Response.text("handled: " + str(error), 418)
+        result = app.dispatch(Request("GET", "/boom", {}))
+        self.assertEqual(result.status, 418)
+        self.assertEqual(result.body, b"handled: missing record")

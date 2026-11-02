@@ -25,6 +25,7 @@ class Limbo:
         self.templates = TemplateEngine()
         self.frontend_servers: list[FrontendDevServer] = []
         self.max_body_bytes = max_body_bytes
+        self.exception_handlers: dict[object, Callable] = {}
 
     @property
     def routes(self) -> list[dict[str, object]]:
@@ -40,10 +41,10 @@ class Limbo:
         return RouteGroup(self.router, prefix=prefix, name=name)
 
     def route(self, path: str, methods: tuple[str, ...] = ("GET",), *,
-              name: str | None = None, priority: int = 0):
+              name: str | None = None, priority: int = 0, middleware: tuple[Callable, ...] = ()):
         def decorate(handler):
             for method in methods:
-                self.router.add(method, path, handler, name=name, priority=priority)
+                self.router.add(method, path, handler, name=name, priority=priority, middleware=middleware)
             return handler
         return decorate
 
@@ -91,6 +92,30 @@ class Limbo:
                 return
         websocket.close(1008, "Route not found")
 
+    def exception_handler(self, exception_or_status):
+        """Register an error handler for an HTTP status or exception class."""
+        if not (isinstance(exception_or_status, int) and 400 <= exception_or_status <= 599) and not (
+            isinstance(exception_or_status, type) and issubclass(exception_or_status, Exception)
+        ):
+            raise TypeError("Use an HTTP error status or Exception subclass")
+        def register(handler):
+            self.exception_handlers[exception_or_status] = handler
+            return handler
+        return register
+
+    def _error_response(self, error: Exception, status: int) -> Response:
+        handler = self.exception_handlers.get(status)
+        if handler is None:
+            for cls in type(error).__mro__:
+                if cls in self.exception_handlers:
+                    handler = self.exception_handlers[cls]
+                    break
+        if handler is None:
+            return Response.text(str(error) if isinstance(error, HTTPError) else "Internal Server Error", status)
+        try:
+            return self._coerce(handler(error))
+        except Exception:
+            return Response.text("Internal Server Error", 500)
     def middleware(self, function: Callable | None = None):
         def register(fn):
             self.middlewares.append(fn)
@@ -146,7 +171,11 @@ class Limbo:
                 route, params, allowed = self.router.match(req.method, req.path)
                 if route:
                     req.path_params = params
-                    return self._coerce(route.handler(req))
+                    endpoint = lambda current: self._coerce(route.handler(current))
+                    for middleware in reversed(route.middleware):
+                        downstream = endpoint
+                        endpoint = lambda current, mw=middleware, nxt=downstream: self._coerce(mw(current, nxt))
+                    return endpoint(req)
                 if req.method == "OPTIONS" and allowed:
                     return Response(b"", 204, {"Allow": ", ".join(sorted(allowed | {"OPTIONS"}))})
                 for prefix, root in self.static_mounts:
@@ -165,9 +194,9 @@ class Limbo:
                 next_handler = lambda req, mw=middleware, nxt=downstream: self._coerce(mw(req, nxt))
             return next_handler(request)
         except HTTPError as exc:
-            return Response.text(exc.message, exc.status)
-        except Exception:
-            return Response.text("Internal Server Error", 500)
+            return self._error_response(exc, exc.status)
+        except Exception as exc:
+            return self._error_response(exc, 500)
 
     @staticmethod
     def _coerce(value) -> Response:

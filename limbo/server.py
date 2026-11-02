@@ -305,33 +305,57 @@ class LimboServer:
             size_total += size
 
     def _write_response(self, conn: socket.socket, response: Response, method: str, keep_alive: bool) -> None:
-        status = response.status if 100 <= response.status <= 599 else 500
-        try:
-            phrase = HTTPStatus(status).phrase
-        except ValueError:
-            phrase = "Unknown"
-        headers = {k.lower(): v for k, v in response.headers.items()}
+        status = response.status if isinstance(response.status, int) and 100 <= response.status <= 599 else 500
+        phrase = HTTPStatus(status).phrase
+        headers: dict[str, str] = {}
+        for key, value in response.headers.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                raise ValueError("Response headers must be strings")
+            normalized = key.lower()
+            token_chars = "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyz"
+            if not normalized or any(ch not in token_chars for ch in normalized):
+                raise ValueError("Invalid response header name")
+            if normalized in headers:
+                raise ValueError("Duplicate response header")
+            if any(ord(ch) < 0x20 and ch != "\t" or ord(ch) == 0x7f for ch in value):
+                raise ValueError("Invalid response header value")
+            headers[normalized] = value
         headers.setdefault("date", datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT"))
         headers.setdefault("server", "Limbo/0.1")
-        headers.setdefault("connection", "keep-alive" if keep_alive else "close")
+        headers["connection"] = "keep-alive" if keep_alive else "close"
         stream_body = not isinstance(response.body, bytes)
         no_body = method == "HEAD" or status in (204, 205, 304) or 100 <= status < 200
+        if "content-length" in headers and "transfer-encoding" in headers:
+            raise ValueError("Conflicting response framing headers")
+        if "transfer-encoding" in headers:
+            if headers["transfer-encoding"].strip().lower() != "chunked" or not stream_body or no_body:
+                raise ValueError("Unsupported response Transfer-Encoding")
+        expected = None
+        if "content-length" in headers:
+            raw_length = headers["content-length"]
+            if not re.fullmatch(r"[0-9]+", raw_length) or len(raw_length) > 20:
+                raise ValueError("Invalid response Content-Length")
+            expected = int(raw_length)
         if status in (204, 304) or 100 <= status < 200:
             headers.pop("content-length", None)
             headers.pop("transfer-encoding", None)
+            expected = None
         elif status == 205:
             headers.pop("transfer-encoding", None)
             headers["content-length"] = "0"
-        chunked = stream_body and not no_body and "content-length" not in headers
-        if chunked:
-            headers.setdefault("transfer-encoding", "chunked")
-        elif not stream_body and status not in (204, 205, 304) and not 100 <= status < 200:
-            headers["content-length"] = str(len(response.body))
-        for key, value in headers.items():
-            if not key or any(ch in key for ch in "\r\n:") or any(ch in value for ch in "\r\n"):
-                raise ValueError("Invalid response header")
-        head = f"HTTP/1.1 {status} {phrase}\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers.items()) + "\r\n"
-        conn.sendall(head.encode("latin-1", "replace"))
+            expected = 0
+        elif not stream_body:
+            actual = len(response.body)
+            if expected is not None and expected != actual:
+                raise ValueError("Response Content-Length does not match body")
+            headers["content-length"] = str(actual)
+            expected = actual
+        chunked = stream_body and not no_body and headers.get("transfer-encoding", "").lower() == "chunked"
+        if stream_body and not no_body and expected is None and not chunked:
+            headers["transfer-encoding"] = "chunked"
+            chunked = True
+        head = f"HTTP/1.1 {status} {phrase}\\r\\n" + "".join(f"{k}: {v}\\r\\n" for k, v in headers.items()) + "\\r\\n"
+        conn.sendall(head.encode("latin-1", "strict"))
         if no_body:
             return
         if not stream_body:
@@ -339,14 +363,16 @@ class LimboServer:
                 conn.sendall(response.body)
             return
         sent = 0
-        expected = int(headers["content-length"]) if stream_body and "content-length" in headers else None
         for chunk in response.body:
             if not isinstance(chunk, bytes):
                 raise TypeError("Streaming response chunks must be bytes")
-            if chunk:
-                sent += len(chunk)
-                conn.sendall((f"{len(chunk):X}\r\n".encode("ascii") + chunk + b"\r\n") if chunked else chunk)
+            if not chunk:
+                continue
+            sent += len(chunk)
+            if expected is not None and sent > expected:
+                raise ValueError("Streaming response exceeds Content-Length")
+            conn.sendall((f"{len(chunk):X}\\r\\n".encode("ascii") + chunk + b"\\r\\n") if chunked else chunk)
         if expected is not None and sent != expected:
             raise ValueError("Streaming response length does not match Content-Length")
         if chunked:
-            conn.sendall(b"0\r\n\r\n")
+            conn.sendall(b"0\\r\\n\\r\\n")
