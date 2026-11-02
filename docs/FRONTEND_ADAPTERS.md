@@ -48,7 +48,7 @@ source-map/HMR claims, maturity status, and a human-readable reason. Consumers
 should ignore unknown future fields and check `schema_version` before relying
 on the schema.
 
-## Non-goals of this first slice
+## Transform cache and development reload\n\nTransformed source is cached persistently under `.limbo/cache/frontend`, ignored by Git and inaccessible through the public frontend route. Cache keys include source bytes, relative path, extension, adapter/tool identity and transform options; writes use an atomic replace. Editing a file naturally produces a new key, so stale output is not reused.\n\nThe dev server exposes a version endpoint and a small polling client. When a watched module or asset changes, it performs a safe full-page reload. This is a reload fallback, not Hot Module Replacement: module state is not preserved and the manifest correctly continues to report HMR as unavailable.\n\n## Non-goals of this first slice
 
 This contract does not claim that all package exports, CSS imports, dynamic
 imports, source maps, HMR, or production builds are implemented. Those remain
