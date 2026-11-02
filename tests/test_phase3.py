@@ -197,10 +197,10 @@ class WebSocketOriginPolicyTests(unittest.TestCase):
         try:
             with socket.create_connection(("127.0.0.1", server.port), timeout=2) as client:
                 client.sendall(
-                    b"GET /ws HTTP/1.1\\r\\nHost: localhost\\r\\nOrigin: https://evil.example\\r\\n"
-                    b"Upgrade: websocket\\r\\nConnection: Upgrade\\r\\n"
-                    b"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\\r\\n"
-                    b"Sec-WebSocket-Version: 13\\r\\n\\r\\n"
+                    b"GET /ws HTTP/1.1\r\nHost: localhost\r\nOrigin: https://evil.example\r\n"
+                    b"Upgrade: websocket\r\nConnection: Upgrade\r\n"
+                    b"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                    b"Sec-WebSocket-Version: 13\r\n\r\n"
                 )
                 response = client.recv(4096)
                 self.assertIn(b"403 Forbidden", response)
