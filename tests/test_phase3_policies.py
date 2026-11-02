@@ -5,7 +5,8 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 
-from limbo import Limbo, Request, SessionBackend, SessionStore, session_middleware
+from limbo import (Limbo, Request, SessionBackend, SessionStore, authenticate,
+                   authorize, session_middleware)
 from limbo.server import LimboServer
 from limbo.websocket import WebSocket
 
@@ -39,6 +40,22 @@ class WebSocketPolicyTests(unittest.TestCase):
         finally:
             left.close()
             right.close()
+
+    def test_receive_rejects_oversized_client_message(self):
+        server_sock, client_sock = socket.socketpair()
+        try:
+            ws = WebSocket(server_sock, max_message_bytes=3)
+            mask = b"abcd"
+            payload = b"four"
+            masked = bytes(value ^ mask[index % 4] for index, value in enumerate(payload))
+            client_sock.sendall(bytes((0x81, 0x80 | len(payload))) + mask + masked)
+            self.assertIsNone(ws.receive())
+            close_frame = client_sock.recv(64)
+            self.assertEqual(close_frame[0] & 0x0F, 8)
+            self.assertEqual(int.from_bytes(close_frame[2:4], "big"), 1009)
+        finally:
+            server_sock.close()
+            client_sock.close()
 
     def test_idle_timeout_closes_with_going_away_code(self):
         app = Limbo()
@@ -113,6 +130,28 @@ class UploadConfigurationTests(unittest.TestCase):
         ):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 Limbo(**kwargs)
+
+
+class AuthenticationExtensionTests(unittest.TestCase):
+    def test_authentication_and_authorization_hooks(self):
+        app = Limbo()
+        require_user = authenticate(lambda request: {"id": 4} if request.cookie("auth") == "valid" else None)
+        admin_only = authorize(lambda request, user: user["id"] == 4)
+
+        @app.get("/private", middleware=(require_user, admin_only))
+        def private(request):
+            return {"user": request.user["id"]}
+
+        self.assertEqual(app.dispatch(Request("GET", "/private", {})).status, 401)
+        response = app.dispatch(Request("GET", "/private", {"cookie": "auth=valid"}))
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.body, b'{"user":4}')
+
+        denied = authorize(lambda request, user: False)
+        @app.get("/denied", middleware=(require_user, denied))
+        def denied_route(request):
+            return "unreachable"
+        self.assertEqual(app.dispatch(Request("GET", "/denied", {"cookie": "auth=valid"})).status, 403)
 
 
 class SessionBackendContractTests(unittest.TestCase):
