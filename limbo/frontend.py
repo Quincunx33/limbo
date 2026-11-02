@@ -488,10 +488,9 @@ class FrontendDevServer:
                 if css_path not in self._allowed_modules or css_path.suffix.lower() != ".css":
                     return Response.text("CSS module not found", 404)
                 css_url = self._module_url(css_path)
-                js = ("const response = await fetch(" + json.dumps(css_url) + ");\n"
-                      "if (!response.ok) throw new Error(`Limbo CSS load failed: ${response.status}`);\n"
-                      "const css = await response.text();\n"
-                      "const style = document.createElement('style'); style.textContent = css; document.head.appendChild(style);\n")
+                js = ("const link = document.createElement('link');\n"
+                      "link.rel = 'stylesheet'; link.href = " + json.dumps(css_url) + ";\n"
+                      "document.head.appendChild(link);\n")
                 return Response(js, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
             if relative.startswith("_pkgfile/"):
                 decoded_package_path = unquote(relative[len("_pkgfile/"):])
