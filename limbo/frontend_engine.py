@@ -93,11 +93,12 @@ class EsbuildAdapter:
         reason="Requires a locally installed esbuild executable; no automatic installation.",
     )
 
-    def __init__(self, project_root: str | Path, executable: str | None = None) -> None:
+    def __init__(self, project_root: str | Path, executable: str | None = None, *, jsx_import_source: str = "react") -> None:
         self.root = Path(project_root).expanduser().resolve()
         local_name = "esbuild.cmd" if __import__("os").name == "nt" else "esbuild"
         local = self.root / "node_modules" / ".bin" / local_name
         self.executable = executable or (str(local) if local.is_file() else shutil.which("esbuild"))
+        self.jsx_import_source = jsx_import_source
 
     def detect(self) -> bool:
         return bool(self.executable)
@@ -121,7 +122,7 @@ class EsbuildAdapter:
             except (OSError, UnicodeError) as exc:
                 raise AdapterError(f"cannot read {path}: {exc}") from exc
         args = [self.executable, "--loader=" + loader, "--format=esm", "--target=es2020",
-                "--jsx=automatic", "--sourcemap=inline", "--sourcefile=" + path.name, "--log-level=error"]
+                "--jsx=automatic", "--jsx-import-source=" + self.jsx_import_source, "--sourcemap=inline", "--sourcefile=" + path.name, "--log-level=error"]
         try:
             result = subprocess.run(
                 args, cwd=self.root, input=source, text=True, capture_output=True,
