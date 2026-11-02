@@ -7,10 +7,10 @@ from limbo.cli import main as cli_main
 from contextlib import redirect_stdout
 from io import StringIO
 
+from limbo.frontend import DependencyGraph, ModuleResolver
 from limbo.frontend_scanner import scan_imports
 from limbo.frontend_engine import (
     AdapterError, AdapterRegistry, BrowserNativeAdapter, EsbuildAdapter,
-    TransformResult,
 )
 
 
@@ -47,9 +47,7 @@ const meta = import.meta.url;
                 'const note = "import \\"./fake.js\\""; import("./lazy.js");', encoding="utf-8")
             (root / "lazy.js").write_text("export default 1;", encoding="utf-8")
             (root / "fake.js").write_text("export default 0;", encoding="utf-8")
-            graph = __import__("limbo.frontend", fromlist=["DependencyGraph"]).DependencyGraph(
-                __import__("limbo.frontend", fromlist=["ModuleResolver"]).ModuleResolver(root)
-            )
+            graph = DependencyGraph(ModuleResolver(root))
             edges = graph.build("main.js")
             main = (root / "main.js").resolve()
             self.assertEqual({path.name for path in edges[main]}, {"lazy.js"})
