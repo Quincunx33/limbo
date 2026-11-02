@@ -62,10 +62,10 @@ class WebSocketPolicyTests(unittest.TestCase):
         client.settimeout(2)
         try:
             client.sendall(
-                b"GET /ws HTTP/1.1\\r\\nHost: localhost\\r\\n"
-                b"Upgrade: websocket\\r\\nConnection: Upgrade\\r\\n"
-                b"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\\r\\n"
-                b"Sec-WebSocket-Version: 13\\r\\n\\r\\n"
+                b"GET /ws HTTP/1.1\r\nHost: localhost\r\n"
+                b"Upgrade: websocket\r\nConnection: Upgrade\r\n"
+                b"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                b"Sec-WebSocket-Version: 13\r\n\r\n"
             )
             response = client.recv(4096)
             self.assertIn(b"101 Switching Protocols", response)
@@ -84,10 +84,10 @@ class UploadConfigurationTests(unittest.TestCase):
     @staticmethod
     def multipart(payload):
         return (
-            b"--BOUND\\r\\n"
-            b'Content-Disposition: form-data; name="upload"; filename="x.bin"\\r\\n'
-            b"Content-Type: application/octet-stream\\r\\n\\r\\n"
-            + payload + b"\\r\\n--BOUND--\\r\\n"
+            b"--BOUND\r\n"
+            b'Content-Disposition: form-data; name="upload"; filename="x.bin"\r\n'
+            b"Content-Type: application/octet-stream\r\n\r\n"
+            + payload + b"\r\n--BOUND--\r\n"
         )
 
     def test_application_upload_limits_are_applied_to_request_parser(self):
