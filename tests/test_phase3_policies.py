@@ -2,8 +2,10 @@ import socket
 import threading
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from unittest import mock
 
-from limbo import Limbo, Request
+from limbo import Limbo, Request, SessionBackend, SessionStore, session_middleware
 from limbo.server import LimboServer
 from limbo.websocket import WebSocket
 
@@ -111,6 +113,57 @@ class UploadConfigurationTests(unittest.TestCase):
         ):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 Limbo(**kwargs)
+
+
+class SessionBackendContractTests(unittest.TestCase):
+    def test_store_expiry_and_concurrent_access(self):
+        store = SessionStore(max_age=1, max_sessions=500)
+        session_id = "S" * 43
+        with mock.patch("limbo.sessions.time.monotonic", side_effect=[10.0, 12.0]):
+            store.save(session_id, {"user": 7})
+            self.assertIsNone(store.load(session_id))
+
+        def write(index):
+            key = str(index).replace("-", "_")
+            identifier = (key + "x" * 43)[:43]
+            store.save(identifier, {"index": index})
+            return store.load(identifier)
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(write, range(200)))
+        self.assertEqual(len(results), 200)
+        self.assertTrue(all(item is not None for item in results))
+
+    def test_custom_persistent_adapter_satisfies_contract(self):
+        class Adapter:
+            max_age = 1800
+
+            def __init__(self):
+                self.data = {}
+
+            def load(self, session_id):
+                value = self.data.get(session_id)
+                return dict(value) if value is not None else None
+
+            def save(self, session_id, data):
+                self.data[session_id] = dict(data)
+
+            def delete(self, session_id):
+                self.data.pop(session_id, None)
+
+        adapter = Adapter()
+        self.assertIsInstance(adapter, SessionBackend)
+        app = Limbo()
+        app.middleware(session_middleware(adapter, secure=False))
+
+        @app.post("/login")
+        def login(request):
+            request.session["user_id"] = 9
+            return {"ok": True}
+
+        response = app.dispatch(Request("POST", "/login", {}))
+        self.assertEqual(response.status, 200)
+        self.assertEqual(len(adapter.data), 1)
 
 
 if __name__ == "__main__":
