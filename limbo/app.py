@@ -294,6 +294,8 @@ class Limbo:
             return self._error_response(exc, exc.status)
         except Exception as exc:
             return self._error_response(exc, 500)
+        finally:
+            request.close_uploads()
 
     @staticmethod
     def _coerce(value) -> Response:
