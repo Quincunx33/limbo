@@ -208,6 +208,7 @@ class LimboServer:
                     break
                 request_count += 1
                 if request.headers.get("upgrade", "").lower() == "websocket":
+                    request.close_uploads()
                     self._serve_websocket(conn, stream, request)
                     break
                 connection_tokens = {item.strip().lower() for item in request.headers.get("connection", "").split(",")}
@@ -224,6 +225,8 @@ class LimboServer:
                     response = Response.text(exc.message, exc.status)
                 except Exception:
                     response = Response.text("Internal Server Error", 500)
+                finally:
+                    request.close_uploads()
                 if request.version == "HTTP/1.0" and not isinstance(response.body, bytes) and "content-length" not in {k.lower() for k in response.headers} and response.status not in (204, 205, 304):
                     keep_alive = False
                 try:
