@@ -85,7 +85,7 @@ class EsbuildAdapter:
         extensions=(".ts", ".tsx", ".jsx"),
         available=False,
         requires=("esbuild",),
-        source_maps=True,
+        source_maps=False,
         hmr=False,
         status="optional",
         reason="Requires a locally installed esbuild executable; no automatic installation.",
@@ -114,7 +114,9 @@ class EsbuildAdapter:
         if not self.executable:
             raise AdapterError("esbuild is not installed locally; install it in the project to enable this adapter")
         args = [self.executable, "--loader=" + loader, "--format=esm", "--target=es2020",
-                "--jsx=automatic", "--sourcemap=external", "--sourcefile=" + path.name, "--log-level=error"]
+                "--jsx=automatic", "--sourcefile=" + path.name, "--log-level=error"]
+        if source is None:
+            args.append(str(path))
         try:
             result = subprocess.run(
                 args, cwd=self.root, input=source, text=True, capture_output=True,
