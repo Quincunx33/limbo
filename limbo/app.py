@@ -251,10 +251,10 @@ class Limbo:
         return Response(candidate.read_bytes(), 200, headers)
 
     def run(self, host: str = "127.0.0.1", port: int = 8000, *, request_timeout: float = 15.0,
-            max_header_bytes: int = 32768) -> None:
+            max_header_bytes: int = 32768, trusted_hosts: tuple[str, ...] | list[str] | None = None) -> None:
         server = LimboServer(self.dispatch, host, port, request_timeout=request_timeout,
                              max_header_bytes=max_header_bytes, max_body_bytes=self.max_body_bytes,
-                             websocket_handler=self.dispatch_websocket if self.websocket_routes else None)
+                             trusted_hosts=trusted_hosts, websocket_handler=self.dispatch_websocket if self.websocket_routes else None)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
