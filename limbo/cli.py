@@ -5,11 +5,14 @@ import argparse
 import importlib.util
 import shutil
 import sys
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import __version__
 from .frontend import FrontendCompiler
 from .config import ConfigError, load_config
+from .project import ProjectMetadataError, edit_package_metadata, preview_directory
 
 
 def _create(name: str) -> int:
@@ -56,12 +59,28 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("info", help="show Limbo version and core capability")
     sub.add_parser("dependencies", help="list optional integrations")
     sub.add_parser("build", help="explain current build support")
+    preview = sub.add_parser("preview", help="serve an existing build output directory")
+    preview.add_argument("--host", default=None); preview.add_argument("--port", type=int, default=None)
+    config_cmd = sub.add_parser("config", help="configuration commands")
+    config_sub = config_cmd.add_subparsers(dest="config_command", required=True)
+    config_sub.add_parser("validate", help="validate limbo.toml and environment overrides")
+    add = sub.add_parser("add", help="declare a frontend package without installing it")
+    add.add_argument("package"); add.add_argument("--dev", action="store_true")
+    remove = sub.add_parser("remove", help="remove a frontend package declaration")
+    remove.add_argument("package")
     frontend = sub.add_parser("frontend", help="inspect local frontend compiler integrations")
     frontend_sub = frontend.add_subparsers(dest="frontend_command", required=True)
     frontend_doctor = frontend_sub.add_parser("doctor", help="inspect optional frontend tools")
     frontend_doctor.add_argument("directory", nargs="?", default=".")
     args = parser.parse_args(argv)
     if args.command == "create": return _create(args.name)
+    if args.command in ("add", "remove"):
+        try:
+            message = edit_package_metadata(Path.cwd(), args.command, args.package, dev=getattr(args, "dev", False))
+        except ProjectMetadataError as exc:
+            print(f"Error: {exc}", file=sys.stderr); return 2
+        print(message)
+        return 0
     if args.command in ("dev", "start"):
         try:
             config = load_config(overrides={"server": {"host": args.host, "port": args.port}})
@@ -73,6 +92,26 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         except (OSError, RuntimeError, TypeError, ConfigError) as exc:
             print(f"Error: {exc}", file=sys.stderr); return 2
+    if args.command == "preview":
+        try:
+            config = load_config(overrides={"server": {"host": args.host, "port": args.port}})
+            output = preview_directory(Path.cwd(), config.build.get("out_dir", "dist"))
+            handler = partial(SimpleHTTPRequestHandler, directory=str(output))
+            server = ThreadingHTTPServer((config.server.get("host", "127.0.0.1"), config.server.get("port", 8000)), handler)
+            print(f"Limbo preview serving {output} at http://{server.server_address[0]}:{server.server_address[1]} (Ctrl+C to stop)")
+            try: server.serve_forever()
+            except KeyboardInterrupt: pass
+            finally: server.server_close()
+            return 0
+        except (OSError, ConfigError, ProjectMetadataError) as exc:
+            print(f"Error: {exc}", file=sys.stderr); return 2
+    if args.command == "config" and args.config_command == "validate":
+        try: config = load_config()
+        except ConfigError as exc:
+            print(f"Configuration invalid: {exc}", file=sys.stderr); return 2
+        print(f"Configuration valid: {config.path or 'safe defaults'}")
+        for key, source in sorted(config.sources.items()): print(f"  {key}: {source}")
+        return 0
     if args.command == "info":
         print(f"Limbo {__version__}\nCore: Python standard library only\nHTTP server: built-in threaded TCP implementation")
         return 0
