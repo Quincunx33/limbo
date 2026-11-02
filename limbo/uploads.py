@@ -136,7 +136,7 @@ def parse_multipart(content_type: str, body: bytes, *, max_body_bytes: int = 8 *
             if file_count > max_files:
                 raise ValueError("Multipart file count exceeds the configured limit")
             if len(raw) > max_file_bytes:
-                raise ValueError("Uploaded file exceeds the configured size limit")
+                raise ValueError("Uploaded file size exceeds the configured limit")
             value: str | UploadFile = UploadFile(
                 _safe_name(filename), part.get_content_type() or "application/octet-stream", raw
             )
