@@ -64,10 +64,14 @@ Do not perform a large directory-only rewrite. Introduce compatibility re-export
 - Keep this branch isolated until the baseline is green.
 
 ### Milestone 1 — Core HTTP and routing correctness
-- Audit request-line/header parsing, framing ambiguity, chunked bodies, limits, timeouts, connection shutdown and response framing.
-- Add route groups/prefixes, names, URL reversal, deterministic priority/conflict rules, route introspection, custom 404/405 and route-specific middleware.
-- Validate method token, target form, Host handling and header injection boundaries.
-- Add concurrent and malformed-wire tests.
+- [x] Add route groups/prefixes, names, URL reversal, deterministic priority/conflict rules, route introspection and route-specific middleware.
+- [x] Add status- and exception-class-based error handlers, including custom 404/405 handling.
+- [x] Validate method tokens, origin-form request targets, Host authority and optional trusted-host allowlists.
+- [x] Enforce an absolute request deadline across request-line, headers and body reads; test slow-drip behavior.
+- [x] Validate Content-Length/Transfer-Encoding framing, chunked bodies/trailers, header/body limits and malformed CRLF cases.
+- [x] Audit response Content-Length, Transfer-Encoding, chunked streaming, HEAD and no-body status handling.
+- [x] Add concurrent real-socket and malformed-wire tests; CI passed on Python 3.10–3.13.
+- [ ] Complete broader proxy interoperability, sustained-load shutdown and external protocol testing before production claims.
 
 ### Milestone 2 — Request, response, static and middleware completeness
 - Add response cookies and safe header helpers.
