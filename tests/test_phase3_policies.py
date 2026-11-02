@@ -121,6 +121,33 @@ class UploadConfigurationTests(unittest.TestCase):
         response = app.dispatch(request)
         self.assertEqual(response.status, 413)
 
+    def test_configured_file_and_form_count_limits_are_enforced(self):
+        two_files = (
+            b'--BOUND\\r\\nContent-Disposition: form-data; name="a"; filename="a.txt"\\r\\n\\r\\na\\r\\n'
+            b'--BOUND\\r\\nContent-Disposition: form-data; name="b"; filename="b.txt"\\r\\n\\r\\nb\\r\\n'
+            b'--BOUND--\\r\\n'
+        )
+        files_app = Limbo(max_upload_files=1)
+        @files_app.post("/upload")
+        def upload_files(request):
+            return {"count": len(request.files)}
+        self.assertEqual(files_app.dispatch(Request("POST", "/upload", {
+            "content-type": "multipart/form-data; boundary=BOUND"
+        }, two_files)).status, 413)
+
+        two_fields = (
+            b'--BOUND\\r\\nContent-Disposition: form-data; name="a"\\r\\n\\r\\na\\r\\n'
+            b'--BOUND\\r\\nContent-Disposition: form-data; name="b"\\r\\n\\r\\nb\\r\\n'
+            b'--BOUND--\\r\\n'
+        )
+        fields_app = Limbo(max_form_fields=1)
+        @fields_app.post("/form")
+        def upload_fields(request):
+            return {"count": len(request.form)}
+        self.assertEqual(fields_app.dispatch(Request("POST", "/form", {
+            "content-type": "multipart/form-data; boundary=BOUND"
+        }, two_fields)).status, 413)
+
     def test_upload_limit_configuration_validation(self):
         for kwargs in (
             {"max_body_bytes": -1},
