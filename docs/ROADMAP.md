@@ -160,10 +160,16 @@ The compiler contract must expose capability detection, transform inputs/outputs
 ### Phase 5 — Frontend development engine
 **Goal:** Turn current frontend preview into a reliable local compiler/dev pipeline.
 
-1. Specify compiler adapter API and machine-readable capability manifest.
+**Status: IN PROGRESS — adapter contract foundation landed.** Added a public `CompilerAdapter` protocol, immutable capability/result models, deterministic adapter registry, versioned JSON capability manifest, browser-native JS/MJS/CSS pass-through adapter, and optional local esbuild adapter for TS/TSX/JSX. Added `limbo frontend capabilities [directory] [--json]`; no compiler is downloaded or installed. The esbuild adapter reports only capabilities it currently implements; source maps and HMR are not advertised. Vue/Svelte continue through the existing SFC bridge and are not falsely listed as registered adapters. See [Frontend adapter contract](FRONTEND_ADAPTERS.md).
+
+**Verification added:** unit coverage for native JS/CSS pass-through, extension rejection, project-root enforcement, duplicate adapter IDs, stable manifest JSON and CLI output. The Phase 5 test file is included in the Linux/Windows/macOS platform-smoke workflow and the complete Python-version unit suite.
+
+**Remaining Phase 5 work:** replace regex-only dependency discovery with a structured scanner; complete package `exports`/`imports` conditions and CSS/asset resolution; integrate all transforms through the adapter contract; add real source-map output, content-addressed cache, incremental graph updates, HMR/full-reload fallback, and browser-level fixtures including WASM. This phase is not complete until real sample apps pass the end-to-end exit gate.
+
+1. Specify compiler adapter API and machine-readable capability manifest. **Foundation implemented; continue evolving contract against real adapters.**
 2. Upgrade dependency discovery beyond regex-only literal imports; handle static ESM, re-exports, CSS imports, assets and supported dynamic imports.
 3. Implement package resolution rules: package exports/imports, conditions, aliases, extensions, index files and deterministic errors.
-4. Add adapters for browser-native modules, TypeScript, JSX/TSX and CSS/assets.
+4. Add adapters for browser-native modules, TypeScript, JSX/TSX and CSS/assets. **Initial browser-native and esbuild adapters added; full integration pending.**
 5. Add official local compiler adapters for Vue and Svelte; then evaluate Preact, Solid, Lit, Angular and others independently.
 6. Build persistent content-addressed cache keyed by source, compiler version, options and dependency state.
 7. Add incremental invalidation and dependency graph updates.
