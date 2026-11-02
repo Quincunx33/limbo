@@ -90,7 +90,7 @@ def home(req):
     return app.html("<div id='app'></div>" + app.frontend_script("src/main.js"))
 ```
 
-The import map is emitted before the module entry. `limbo frontend doctor [directory]` inspects optional tools. To transform TypeScript/JSX/TSX, install esbuild in the *frontend project* yourself, for example `npm install --save-dev esbuild`. Vue SFC compilation needs `vue` plus `@vue/compiler-sfc`; Svelte SFC compilation needs `svelte`. Limbo does not run npm or fetch compilers for you. The base server may be used without Node.js for browser-native JavaScript modules.
+The import map is emitted before the module entry. `limbo frontend doctor [directory]` inspects optional tools. To transform TypeScript/JSX/TSX, install esbuild in the *frontend project* yourself, for example `npm install --save-dev esbuild`. Vue SFC compilation needs `vue` plus `@vue/compiler-sfc`; Svelte SFC compilation needs `svelte`. Limbo does not run npm or fetch compilers for you. The base server may be used without Node.js for browser-native JavaScript modules. `limbo frontend capabilities --json` prints the versioned adapter capability manifest. The public adapter contract and current support boundaries are documented in [Frontend adapters](docs/FRONTEND_ADAPTERS.md).
 
 There is a Vue sample in `examples/frontend/`. From the repository root, install the sample’s optional modules with `cd examples/frontend && npm install`, return to the repository root, then run `python examples/frontend_app.py` and open `http://127.0.0.1:8000`.
 
