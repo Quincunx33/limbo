@@ -6,6 +6,7 @@ are delegated to locally installed, optional mature compiler packages.
 from __future__ import annotations
 
 import html
+import hashlib
 import json
 import os
 import re
@@ -444,6 +445,8 @@ class FrontendDevServer:
         graph = self.graph.build(entry, transform=self._source_for_graph)
         imports = {}
         self._allowed_modules.update(graph)
+        for dependencies in graph.values():
+            self._allowed_modules.update(dependencies)
         for source in graph:
             for specifier in self.graph.bare_imports.get(source, ()):
                 target = self.resolver.resolve(specifier, source).path
@@ -454,7 +457,8 @@ class FrontendDevServer:
         import_map = json.dumps(self.import_map(entry), separators=(",", ":")).replace("</", "<\\/")
         source = self.prefix + "/" + quote(entry.lstrip("/"), safe="/@._-")
         return (f'<script type="importmap">{import_map}</script>\n'
-                f'<script type="module" src="{html.escape(source, quote=True)}"></script>')
+                f'<script type="module" src="{html.escape(source, quote=True)}"></script>\n'
+                f'<script src="{html.escape(self.prefix + "/_client.js", quote=True)}" defer></script>')
 
     def serve(self, request: Request) -> Response:
         if not (request.path == self.prefix or request.path.startswith(self.prefix + "/")):
@@ -465,6 +469,11 @@ class FrontendDevServer:
                 entry = request.query_params.get("entry", [""])[0]
                 if not entry: return Response.json({"error": "Missing entry query parameter"}, 400)
                 return Response.json(self.import_map(entry), headers={"Cache-Control": "no-store"})
+            if relative == "_version":
+                return Response.json({"version": self._version_token()}, headers={"Cache-Control": "no-store"})
+            if relative == "_client.js":
+                client = ("(()=>{let version=null;const poll=async()=>{try{const r=await fetch(" + json.dumps(self.prefix + "/_version") + ",{cache:'no-store'});if(!r.ok)return;const d=await r.json();if(version===null)version=d.version;else if(version!==d.version)location.reload()}catch(_){}};poll();setInterval(poll,1200)})();")
+                return Response(client, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
             if relative.startswith("_css/"):
                 css_relative = unquote(relative[len("_css/"):])
                 css_path = (self.root / css_relative).resolve(strict=True)
@@ -504,6 +513,17 @@ class FrontendDevServer:
             return Response(candidate.read_bytes(), 200, {"Content-Type": _mime(candidate), "Cache-Control": "no-store"})
         except (FrontendError, ValueError, OSError) as exc:
             return Response.text(str(exc), 422)
+
+    def _version_token(self) -> str:
+        digest = hashlib.sha256()
+        for path in sorted(self._allowed_modules, key=lambda item: item.as_posix()):
+            try:
+                stat = path.stat()
+            except OSError:
+                digest.update((path.as_posix() + "|missing").encode("utf-8"))
+                continue
+            digest.update(f"{path.as_posix()}|{stat.st_mtime_ns}|{stat.st_size}\n".encode("utf-8"))
+        return digest.hexdigest()
 
     def _rewrite_internal_imports(self, code: str, importer: Path) -> str:
         try:
