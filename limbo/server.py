@@ -401,9 +401,13 @@ class LimboServer:
             headers.pop("transfer-encoding", None); headers["content-length"] = "0"; expected = 0
         elif not stream_body:
             actual = len(response.body)
-            if expected is not None and expected != actual:
+            # A HEAD response carries the representation length even though
+            # its body is intentionally suppressed on the wire.
+            if expected is not None and expected != actual and method != "HEAD":
                 raise ValueError("Response Content-Length does not match body")
-            headers["content-length"] = str(actual); expected = actual
+            if expected is None:
+                headers["content-length"] = str(actual)
+                expected = actual
         chunked = stream_body and not no_body and headers.get("transfer-encoding", "").lower() == "chunked"
         if stream_body and not no_body and expected is None and not chunked and protocol_version == "HTTP/1.1":
             headers["transfer-encoding"] = "chunked"; chunked = True
