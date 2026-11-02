@@ -81,10 +81,12 @@ class BackgroundTasks:
                 ))
 
     def shutdown(self, *, wait: bool = True, cancel_pending: bool = True) -> None:
-        """Reject new tasks, optionally cancel queued work, and join workers."""
+        """Reject new tasks, optionally cancel queued work, and join workers.
+
+        Calling shutdown again with wait=True is supported after an earlier
+        non-blocking shutdown so applications can later join remaining workers.
+        """
         with self._lock:
-            if self._closed:
-                return
             self._closed = True
         self._executor.shutdown(wait=wait, cancel_futures=cancel_pending)
 
