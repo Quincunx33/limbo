@@ -30,8 +30,8 @@ This is a useful foundation, not yet the target product. The README's explicit l
 1. `limbo build` is intentionally not implemented.
 2. `limbo dev --public` and all tunnel lifecycle commands are not implemented.
 3. TOML configuration is generated as a sample file but is not loaded or validated.
-4. Route groups, route-specific middleware, route priorities, route URL reversal and full route introspection are missing.
-5. The HTTP server is a custom threaded implementation, but it needs a dedicated protocol/security audit and adversarial parser tests before production claims.
+4. Route groups, nested prefixes, route names, URL reversal, route priorities and route introspection now exist on the engineering branch. Route-specific middleware and custom error handlers remain incomplete.
+5. The HTTP server is a custom threaded implementation. The engineering branch now rejects malformed request lines, LF-only framing, duplicate/conflicting framing headers, invalid Content-Length values, invalid chunk syntax and forbidden framing trailers; it also bounds header count/size, body size and requests per connection. This is an initial hardening slice, not a production security certification.
 6. Static serving has useful containment, validators and byte ranges; compression, robust conditional semantics, SPA fallback and an explicit symlink policy remain incomplete.
 7. Frontend dependency scanning is not a complete JavaScript parser. Literal ESM import support must not be confused with arbitrary dynamic import/CSS graph support.
 8. HMR, persistent compiler cache, production optimization, code splitting and source-map pipeline are missing.
@@ -59,7 +59,7 @@ Do not perform a large directory-only rewrite. Introduce compatibility re-export
 
 ### Milestone 0 — Baseline and engineering controls
 - Record the current API and test coverage.
-- Add CI for supported Python versions and operating systems.
+- Add CI for supported Python versions; operating-system coverage remains pending.
 - Add security-focused tests and a capability matrix.
 - Keep this branch isolated until the baseline is green.
 
@@ -123,4 +123,4 @@ A milestone is complete only when:
 
 ## Immediate next implementation slice
 
-Start with Milestone 1, but keep changes small: route groups and route introspection/URL reversal first, followed by a separate HTTP parser hardening change. This avoids mixing public API changes with wire-protocol changes and makes regressions easier to isolate.
+Continue Milestone 1 with the remaining connection-lifecycle and response-framing audit. The current parser-hardening slice and routing API changes are on `engineering/universal-limbo`; they are not yet merged to `main`.
