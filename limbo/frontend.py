@@ -18,6 +18,7 @@ from urllib.parse import quote, unquote
 
 from .http import Request, Response
 from .frontend_scanner import scan_imports
+from .frontend_cache import TransformCache
 
 
 EXTENSIONS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".json")
@@ -425,6 +426,7 @@ class FrontendDevServer:
         self.resolver = ModuleResolver(self.root)
         self.graph = DependencyGraph(self.resolver)
         self.compiler = FrontendCompiler(self.root)
+        self.cache = TransformCache(self.root)
         self._allowed_modules: set[Path] = set()
 
     def import_map(self, entry: str) -> dict[str, Any]:
@@ -457,7 +459,7 @@ class FrontendDevServer:
                 module_path = (self.root / decoded_package_path).resolve(strict=True)
                 if not module_path.is_relative_to(self.root / "node_modules") or module_path not in self._allowed_modules:
                     return Response.text("Frontend module not found", 404)
-                content = self._rewrite_internal_imports(self.compiler.transform(module_path), module_path)
+                content = self._rewrite_internal_imports(self._transform_cached(module_path), module_path)
                 return Response(content, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
             decoded = unquote(relative)
             if any(part.startswith(".") or part == "node_modules" for part in Path(decoded).parts):
@@ -472,7 +474,7 @@ class FrontendDevServer:
             if any(part.startswith(".") or part == "node_modules" for part in resolved_relative.parts):
                 return Response.text("Frontend path is not publicly served", 404)
             if candidate.suffix.lower() in (".js", ".mjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte"):
-                content = self._rewrite_internal_imports(self.compiler.transform(candidate), candidate)
+                content = self._rewrite_internal_imports(self._transform_cached(candidate), candidate)
                 return Response(content, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
             if candidate.suffix.lower() not in (".css", ".svg", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico",
                                                    ".woff", ".woff2", ".ttf", ".wasm", ".mp3", ".mp4"):
@@ -497,9 +499,28 @@ class FrontendDevServer:
             code = code[:start] + replacement + code[end:]
         return code
 
+    def _transform_cached(self, path: Path) -> str:
+        resolved = path.resolve(strict=True)
+        self.resolver._assert_in_project(resolved)
+        source = resolved.read_bytes()
+        relative = resolved.relative_to(self.root).as_posix()
+        tool_identity = "limbo-frontend-v1"
+        if self.compiler.esbuild:
+            tool_identity += "|esbuild:" + self.compiler.esbuild
+        if self.compiler.node:
+            tool_identity += "|node:" + self.compiler.node
+        options = {"path": relative, "suffix": resolved.suffix.lower(), "tool": tool_identity}
+        key = self.cache.key(source, compiler="limbo-frontend-transform-v1", options=options)
+        cached = self.cache.get(key)
+        if cached is not None:
+            return cached
+        transformed = self.compiler.transform(resolved)
+        self.cache.put(key, transformed)
+        return transformed
+
     def _source_for_graph(self, path: Path) -> str:
         try:
-            return self.compiler.transform(path)
+            return self._transform_cached(path)
         except FrontendError as exc:
             if "CommonJS module" in str(exc):
                 return path.read_text(encoding="utf-8")
