@@ -6,6 +6,7 @@ are delegated to locally installed, optional mature compiler packages.
 from __future__ import annotations
 
 import html
+import hashlib
 import json
 import os
 import re
@@ -17,9 +18,14 @@ from typing import Any
 from urllib.parse import quote, unquote
 
 from .http import Request, Response
+from .frontend_scanner import scan_imports
+from .frontend_cache import TransformCache
+from .css_scanner import scan_css_dependencies
+from .frontend_engine import AdapterError, EsbuildAdapter
 
 
-EXTENSIONS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".json")
+EXTENSIONS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".json", ".css", ".svg", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico", ".woff", ".woff2", ".ttf", ".wasm", ".mp3", ".mp4")
+GRAPH_SOURCE_EXTENSIONS = {".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".css"}
 BROWSER_BUILTINS = {"assert", "buffer", "child_process", "crypto", "events", "fs", "http", "https",
                     "module", "net", "os", "path", "process", "stream", "timers", "tls", "url", "util", "zlib"}
 IMPORT_RE = re.compile(
@@ -270,6 +276,7 @@ class DependencyGraph:
         self.edges: dict[Path, set[Path]] = {}
         self.reverse: dict[Path, set[Path]] = {}
         self.bare_imports: dict[Path, set[str]] = {}
+        self.diagnostics: dict[Path, tuple[str, ...]] = {}
 
     def build(self, entry: str | os.PathLike[str], *, transform=None) -> dict[Path, set[Path]]:
         resolved_entry = self.resolver._resolve_path(self.resolver.root / entry)
@@ -290,16 +297,33 @@ class DependencyGraph:
                 raise FrontendError(f"Cannot read frontend module {current}: {exc}") from exc
             local_edges: set[Path] = set()
             bare: set[str] = set()
-            scan_source = re.sub(r"/\*[\s\S]*?\*/", "", source)
-            scan_source = re.sub(r"(?m)^\s*//.*$", "", scan_source)
-            for specifier in dict.fromkeys(IMPORT_RE.findall(scan_source)):
+            if current.suffix.lower() == ".css":
+                references = scan_css_dependencies(source)
+                dependencies = [(item.specifier, item.kind) for item in references]
+                self.diagnostics[current] = ()
+            elif current.suffix.lower() in GRAPH_SOURCE_EXTENSIONS:
+                try:
+                    scan = scan_imports(source)
+                except ValueError as exc:
+                    raise FrontendError(f"Cannot scan imports in {current}: {exc}") from exc
+                self.diagnostics[current] = scan.diagnostics
+                dependencies = [(item.specifier, item.kind) for item in scan.imports]
+            else:
+                self.diagnostics[current] = ()
+                dependencies = []
+            for specifier, _kind in dependencies:
                 if specifier.startswith(("http://", "https://", "data:")):
                     continue
+                if current.suffix.lower() == ".css" and not specifier.startswith(("./", "../", "/")):
+                    raise FrontendError(
+                        f"Bare CSS dependency '{specifier}' in {current.name} is not supported yet; use a relative URL"
+                    )
                 if not specifier.startswith(("./", "../", "/", "#")):
                     bare.add(specifier)
                 dependency = self.resolver.resolve(specifier, current).path
                 local_edges.add(dependency)
-                pending.append(dependency)
+                if dependency.suffix.lower() in GRAPH_SOURCE_EXTENSIONS:
+                    pending.append(dependency)
             for stale_dependency in self.edges.get(current, set()) - local_edges:
                 self.reverse.get(stale_dependency, set()).discard(current)
             self.edges[current] = local_edges
@@ -322,6 +346,7 @@ class DependencyGraph:
                 self.reverse.get(dependency, set()).discard(module)
             self.reverse.pop(module, None)
             self.bare_imports.pop(module, None)
+            self.diagnostics.pop(module, None)
         return affected
 
 
@@ -358,18 +383,21 @@ class FrontendCompiler:
                 return self._esbuild_stdin(source, "tsx", source_path, jsx_import_source)
             return source
         loader = {".ts": "ts", ".tsx": "tsx", ".jsx": "jsx", ".json": "json"}.get(suffix)
-        if loader and self.esbuild:
-            args = [self.esbuild, str(source_path), f"--loader:{suffix}={loader}", "--format=esm", "--target=es2020",
-                    "--jsx=automatic", f"--jsx-import-source={jsx_import_source}", "--log-level=error"]
+        if loader in ("ts", "tsx", "jsx"):
+            adapter = EsbuildAdapter(self.root, executable=self.esbuild, jsx_import_source=jsx_import_source)
+            try:
+                return adapter.transform(source_path).code
+            except AdapterError as exc:
+                raise FrontendError(str(exc)) from exc
+        if loader == "json" and self.esbuild:
+            args = [self.esbuild, str(source_path), "--loader:.json=json", "--format=esm", "--target=es2020", "--log-level=error"]
             try:
                 result = subprocess.run(args, cwd=self.root, text=True, capture_output=True, timeout=30, check=False)
             except (OSError, subprocess.TimeoutExpired) as exc:
                 raise FrontendError(f"esbuild could not compile {source_path.name}: {exc}") from exc
             if result.returncode:
-                raise FrontendError("esbuild compilation failed:\n" + result.stderr.strip())
+                raise FrontendError("esbuild compilation failed:\\n" + result.stderr.strip())
             return result.stdout
-        if loader in ("ts", "tsx", "jsx"):
-            raise FrontendError(f"Compiling {suffix} requires optional esbuild. Install it locally (for example: npm install --save-dev esbuild); Limbo will not install it automatically.")
         raise FrontendError(f"No frontend transformer is configured for {suffix or 'extensionless'} files")
 
     def _esbuild_stdin(self, source: str, loader: str, source_path: Path, jsx_import_source: str) -> str:
@@ -418,12 +446,15 @@ class FrontendDevServer:
         self.resolver = ModuleResolver(self.root)
         self.graph = DependencyGraph(self.resolver)
         self.compiler = FrontendCompiler(self.root)
+        self.cache = TransformCache(self.root)
         self._allowed_modules: set[Path] = set()
 
     def import_map(self, entry: str) -> dict[str, Any]:
         graph = self.graph.build(entry, transform=self._source_for_graph)
         imports = {}
         self._allowed_modules.update(graph)
+        for dependencies in graph.values():
+            self._allowed_modules.update(dependencies)
         for source in graph:
             for specifier in self.graph.bare_imports.get(source, ()):
                 target = self.resolver.resolve(specifier, source).path
@@ -434,7 +465,8 @@ class FrontendDevServer:
         import_map = json.dumps(self.import_map(entry), separators=(",", ":")).replace("</", "<\\/")
         source = self.prefix + "/" + quote(entry.lstrip("/"), safe="/@._-")
         return (f'<script type="importmap">{import_map}</script>\n'
-                f'<script type="module" src="{html.escape(source, quote=True)}"></script>')
+                f'<script type="module" src="{html.escape(source, quote=True)}"></script>\n'
+                f'<script src="{html.escape(self.prefix + "/_client.js", quote=True)}" defer></script>')
 
     def serve(self, request: Request) -> Response:
         if not (request.path == self.prefix or request.path.startswith(self.prefix + "/")):
@@ -445,13 +477,33 @@ class FrontendDevServer:
                 entry = request.query_params.get("entry", [""])[0]
                 if not entry: return Response.json({"error": "Missing entry query parameter"}, 400)
                 return Response.json(self.import_map(entry), headers={"Cache-Control": "no-store"})
+            if relative == "_version":
+                return Response.json({"version": self._version_token()}, headers={"Cache-Control": "no-store"})
+            if relative == "_client.js":
+                client = ("(()=>{let version=null;const poll=async()=>{try{const r=await fetch(" + json.dumps(self.prefix + "/_version") + ",{cache:'no-store'});if(!r.ok)return;const d=await r.json();if(version===null)version=d.version;else if(version!==d.version)location.reload()}catch(_){}};poll();setInterval(poll,1200)})();")
+                return Response(client, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
+            if relative.startswith("_css/"):
+                css_relative = unquote(relative[len("_css/"):])
+                css_path = (self.root / css_relative).resolve(strict=True)
+                if css_path not in self._allowed_modules or css_path.suffix.lower() != ".css":
+                    return Response.text("CSS module not found", 404)
+                css_url = self._module_url(css_path)
+                js = ("const link = document.createElement('link');\n"
+                      "link.rel = 'stylesheet'; link.href = " + json.dumps(css_url) + ";\n"
+                      "document.head.appendChild(link);\n")
+                return Response(js, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
             if relative.startswith("_pkgfile/"):
                 decoded_package_path = unquote(relative[len("_pkgfile/"):])
                 module_path = (self.root / decoded_package_path).resolve(strict=True)
                 if not module_path.is_relative_to(self.root / "node_modules") or module_path not in self._allowed_modules:
                     return Response.text("Frontend module not found", 404)
-                content = self._rewrite_internal_imports(self.compiler.transform(module_path), module_path)
-                return Response(content, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
+                if module_path.suffix.lower() in (".js", ".mjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte"):
+                    content = self._rewrite_internal_imports(self._transform_cached(module_path), module_path)
+                    return Response(content, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
+                if module_path.suffix.lower() in (".css", ".svg", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico",
+                                                    ".woff", ".woff2", ".ttf", ".wasm", ".mp3", ".mp4"):
+                    return Response(module_path.read_bytes(), 200, {"Content-Type": _mime(module_path), "Cache-Control": "no-store"})
+                return Response.text("Frontend package asset type is not supported", 404)
             decoded = unquote(relative)
             if any(part.startswith(".") or part == "node_modules" for part in Path(decoded).parts):
                 return Response.text("Frontend path is not publicly served", 404)
@@ -465,7 +517,7 @@ class FrontendDevServer:
             if any(part.startswith(".") or part == "node_modules" for part in resolved_relative.parts):
                 return Response.text("Frontend path is not publicly served", 404)
             if candidate.suffix.lower() in (".js", ".mjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte"):
-                content = self._rewrite_internal_imports(self.compiler.transform(candidate), candidate)
+                content = self._rewrite_internal_imports(self._transform_cached(candidate), candidate)
                 return Response(content, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
             if candidate.suffix.lower() not in (".css", ".svg", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico",
                                                    ".woff", ".woff2", ".ttf", ".wasm", ".mp3", ".mp4"):
@@ -474,25 +526,83 @@ class FrontendDevServer:
         except (FrontendError, ValueError, OSError) as exc:
             return Response.text(str(exc), 422)
 
-    def _rewrite_internal_imports(self, code: str, importer: Path) -> str:
-        def mask(match): return "".join("\n" if char == "\n" else " " for char in match.group(0))
-        scan = re.sub(r"/\*[\s\S]*?\*/", mask, code)
-        scan = re.sub(r"(?m)^\s*//.*$", mask, scan)
-        replacements = []
-        for match in IMPORT_RE.finditer(scan):
-            specifier = match.group(1)
-            if not specifier.startswith("#"):
+    def _version_token(self) -> str:
+        digest = hashlib.sha256()
+        for path in sorted(self._allowed_modules, key=lambda item: item.as_posix()):
+            try:
+                stat = path.stat()
+            except OSError:
+                digest.update((path.as_posix() + "|missing").encode("utf-8"))
                 continue
-            target = self.resolver.resolve(specifier, importer).path
-            self._allowed_modules.add(target)
-            replacements.append((match.start(1), match.end(1), self._module_url(target)))
+            digest.update(path.as_posix().encode("utf-8") + b"\\0")
+            try:
+                with path.open("rb") as source:
+                    for chunk in iter(lambda: source.read(64 * 1024), b""):
+                        digest.update(chunk)
+            except OSError:
+                digest.update(b"|unreadable")
+            digest.update(b"\\n")
+        return digest.hexdigest()
+
+    def _rewrite_internal_imports(self, code: str, importer: Path) -> str:
+        try:
+            scan = scan_imports(code)
+        except ValueError as exc:
+            raise FrontendError(f"Cannot rewrite imports in {importer}: {exc}") from exc
+        replacements = []
+        for reference in scan.imports:
+            specifier = reference.specifier
+            if specifier.startswith("#"):
+                target = self.resolver.resolve(specifier, importer).path
+                replacement = self._module_url(target)
+            elif specifier.lower().endswith(".css"):
+                if reference.kind != "side-effect":
+                    raise FrontendError(
+                        f"CSS imports with bindings are not supported yet in {importer.name}; use a side-effect import"
+                    )
+                target = self.resolver.resolve(specifier, importer).path
+                self._allowed_modules.add(target)
+                relative = target.relative_to(self.root).as_posix()
+                replacement = self.prefix + "/_css/" + quote(relative, safe="/@._-")
+            else:
+                continue
+            replacements.append((reference.start, reference.end, json.dumps(replacement)))
         for start, end, replacement in reversed(replacements):
             code = code[:start] + replacement + code[end:]
         return code
 
+    def _transform_cached(self, path: Path) -> str:
+        resolved = path.resolve(strict=True)
+        self.resolver._assert_in_project(resolved)
+        source = resolved.read_bytes()
+        relative = resolved.relative_to(self.root).as_posix()
+        tool_identity = "limbo-frontend-v1"
+        for label, executable in (("esbuild", self.compiler.esbuild), ("node", self.compiler.node)):
+            if executable:
+                try:
+                    stat = Path(executable).stat()
+                    tool_identity += f"|{label}:{executable}:{stat.st_mtime_ns}:{stat.st_size}"
+                except OSError:
+                    tool_identity += f"|{label}:{executable}:unstatable"
+        for package in ("@vue/compiler-sfc", "svelte"):
+            manifest = self.root / "node_modules" / package / "package.json"
+            if manifest.is_file():
+                try:
+                    tool_identity += f"|{package}:" + hashlib.sha256(manifest.read_bytes()).hexdigest()
+                except OSError:
+                    tool_identity += f"|{package}:unreadable"
+        options = {"path": relative, "suffix": resolved.suffix.lower(), "tool": tool_identity}
+        key = self.cache.key(source, compiler="limbo-frontend-transform-v1", options=options)
+        cached = self.cache.get(key)
+        if cached is not None:
+            return cached
+        transformed = self.compiler.transform(resolved)
+        self.cache.put(key, transformed)
+        return transformed
+
     def _source_for_graph(self, path: Path) -> str:
         try:
-            return self.compiler.transform(path)
+            return self._transform_cached(path)
         except FrontendError as exc:
             if "CommonJS module" in str(exc):
                 return path.read_text(encoding="utf-8")

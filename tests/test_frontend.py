@@ -138,6 +138,97 @@ class FrontendServingTests(unittest.TestCase):
             missing = frontend.serve(Request("GET", "/__limbo/_importmap.json", {}))
             self.assertEqual(missing.status, 400)
 
+    def test_dev_server_emits_full_reload_fallback_and_version_endpoint(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "main.js").write_text('export const value = 1;', encoding="utf-8")
+            frontend = FrontendDevServer(root)
+            tags = frontend.script_tag("main.js")
+            self.assertIn("/__limbo/_client.js", tags)
+            frontend.import_map("main.js")
+            first = frontend.serve(Request("GET", "/__limbo/_version", {}))
+            client = frontend.serve(Request("GET", "/__limbo/_client.js", {}))
+            self.assertEqual(first.status, 200)
+            self.assertEqual(client.status, 200)
+            self.assertIn(b"location.reload()", client.body)
+            old_version = json.loads(first.body)["version"]
+            (root / "main.js").write_text('export const value = 2;', encoding="utf-8")
+            new_version = frontend.serve(Request("GET", "/__limbo/_version", {}))
+            self.assertNotEqual(old_version, json.loads(new_version.body)["version"])
+
+    def test_dev_server_uses_content_addressed_transform_cache(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "main.js").write_text("export const value = 1;", encoding="utf-8")
+            frontend = FrontendDevServer(root)
+            first = frontend.serve(Request("GET", "/__limbo/main.js", {}))
+            second = frontend.serve(Request("GET", "/__limbo/main.js", {}))
+            self.assertEqual(first.status, 200)
+            self.assertEqual(second.status, 200)
+            self.assertEqual(frontend.cache.hits, 1)
+            (root / "main.js").write_text("export const value = 2;", encoding="utf-8")
+            third = frontend.serve(Request("GET", "/__limbo/main.js", {}))
+            self.assertIn(b"value = 2", third.body)
+            self.assertEqual(frontend.cache.misses, 2)
+            hidden_cache = frontend.serve(Request("GET", "/__limbo/.limbo/cache/frontend", {}))
+            self.assertEqual(hidden_cache.status, 404)
+
+    def test_css_side_effect_import_is_rewritten_and_served_as_module(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "src").mkdir()
+            (root / "src" / "main.js").write_text('import "./site.css"; export const ready = true;', encoding="utf-8")
+            (root / "src" / "site.css").write_text("body { color: red; }", encoding="utf-8")
+            frontend = FrontendDevServer(root)
+            entry = frontend.serve(Request("GET", "/__limbo/src/main.js", {}))
+            self.assertEqual(entry.status, 200)
+            self.assertIn(b"/__limbo/_css/src/site.css", entry.body)
+            css_module = frontend.serve(Request("GET", "/__limbo/_css/src/site.css", {}))
+            self.assertEqual(css_module.status, 200)
+            self.assertIn(b"rel = 'stylesheet'", css_module.body)
+            self.assertIn(b"document.head.appendChild", css_module.body)
+            self.assertEqual(frontend.serve(Request("GET", "/__limbo/_css/src/unknown.css", {})).status, 404)
+
+    def test_package_css_asset_is_served_with_css_mime_type(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "src").mkdir()
+            package = root / "node_modules" / "theme" / "dist"
+            package.mkdir(parents=True)
+            (root / "src" / "main.js").write_text('import "theme/style.css";', encoding="utf-8")
+            (root / "node_modules" / "theme" / "package.json").write_text(
+                '{"name":"theme","exports":{"./style.css":"./dist/style.css"}}', encoding="utf-8")
+            (package / "style.css").write_text("body{color:blue}", encoding="utf-8")
+            frontend = FrontendDevServer(root)
+            entry = frontend.serve(Request("GET", "/__limbo/src/main.js", {}))
+            self.assertEqual(entry.status, 200)
+            self.assertIn(b"/__limbo/_css/node_modules/theme/dist/style.css", entry.body)
+            css_module = frontend.serve(Request("GET", "/__limbo/_css/node_modules/theme/dist/style.css", {}))
+            self.assertEqual(css_module.status, 200)
+            self.assertIn(b"stylesheet", css_module.body)
+            package_css = frontend.serve(Request("GET", "/__limbo/_pkgfile/node_modules/theme/dist/style.css", {}))
+            self.assertEqual(package_css.status, 200)
+            self.assertIn("text/css", package_css.headers.get("Content-Type", ""))
+
+    def test_css_import_with_bindings_has_actionable_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "src").mkdir()
+            (root / "src" / "main.js").write_text('import styles from "./site.css";', encoding="utf-8")
+            (root / "src" / "site.css").write_text("body{}", encoding="utf-8")
+            response = FrontendDevServer(root).serve(Request("GET", "/__limbo/src/main.js", {}))
+            self.assertEqual(response.status, 422)
+            self.assertIn(b"side-effect import", response.body)
+
+    def test_wasm_asset_is_served_with_browser_mime_type(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "module.wasm").write_bytes(b"\\x00asm\\x01\\x00\\x00\\x00")
+            response = FrontendDevServer(root).serve(Request("GET", "/__limbo/module.wasm", {}))
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.body, b"\\x00asm\\x01\\x00\\x00\\x00")
+            self.assertIn("application/wasm", response.headers.get("Content-Type", ""))
+
     def test_optional_esbuild_failure_is_actionable(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "main.ts"
