@@ -55,15 +55,39 @@ class _ChunkedBodyReader:
                 if self.total + amount > self.maximum:
                     raise HTTPError(413, "Request body too large")
                 if amount == 0:
+                    trailer_bytes = 0
+                    trailer_count = 0
+                    forbidden = {"content-length", "transfer-encoding", "host", "trailer"}
                     while True:
-                        trailer = self.server._readline(self.stream, 8192, status=431, deadline=self.deadline)
+                        trailer = self.server._readline(
+                            self.stream, min(8192, self.server.max_header_bytes - trailer_bytes),
+                            status=431, deadline=self.deadline
+                        )
                         if not trailer:
                             raise HTTPError(400, "Incomplete chunked trailers")
+                        trailer_bytes += len(trailer)
+                        if trailer_bytes > self.server.max_header_bytes:
+                            raise HTTPError(431, "Trailers too large")
                         if trailer == b"\r\n":
                             self.finished = True
                             break
-                        if b":" not in trailer or trailer[:1] in (b" ", b"\t"):
+                        trailer_count += 1
+                        if trailer_count > self.server.max_header_count:
+                            raise HTTPError(431, "Too many trailer fields")
+                        if trailer[:1] in (b" ", b"\t") or b":" not in trailer:
                             raise HTTPError(400, "Malformed trailer")
+                        name, value = trailer[:-2].split(b":", 1)
+                        try:
+                            name_text = name.decode("ascii").lower()
+                            value_text = value.decode("latin-1").strip(" \t")
+                        except UnicodeDecodeError as exc:
+                            raise HTTPError(400, "Malformed trailer") from exc
+                        if not name_text or any(ch not in "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyz" for ch in name_text):
+                            raise HTTPError(400, "Invalid trailer name")
+                        if name_text in forbidden:
+                            raise HTTPError(400, "Forbidden framing trailer")
+                        if any(ord(ch) < 0x20 and ch != "\t" or ord(ch) == 0x7f for ch in value_text):
+                            raise HTTPError(400, "Invalid trailer value")
                     continue
                 self.remaining = amount
             take = min(wanted - len(output), self.remaining)
