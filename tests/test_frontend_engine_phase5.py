@@ -133,6 +133,7 @@ const meta = import.meta.url;
             self.assertEqual(result.code, "const value = 1;")
             self.assertEqual(run.call_args.kwargs["input"], "const value: number = 1;")
             self.assertIn("--loader=ts", run.call_args.args[0])
+            self.assertIn("--sourcemap=inline", run.call_args.args[0])
 
     def test_registry_manifest_is_stable_json_and_selects_by_extension(self):
         registry = AdapterRegistry((BrowserNativeAdapter(),))
