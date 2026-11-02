@@ -379,7 +379,7 @@ class Limbo:
         if range_header:
             # Ignore unsupported units, malformed syntax and multi-range requests.
             # Return 416 only for a valid byte range that cannot be satisfied.
-            match = __import__("re").fullmatch(r"bytes=(\\d*)-(\\d*)", range_header.strip())
+            match = __import__("re").fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip())
             if match:
                 first, last = match.groups()
                 if first or last:
