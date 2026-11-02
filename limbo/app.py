@@ -20,7 +20,7 @@ class Limbo:
         self.name = name
         self.router = Router()
         self.middlewares: list[Callable] = []
-        self.static_mounts: list[tuple[str, Path]] = []
+        self.static_mounts: list[tuple[str, Path, str | None, str, str]] = []
         self.websocket_routes: list[tuple[object, Callable]] = []
         self.templates = TemplateEngine()
         self.frontend_servers: list[FrontendDevServer] = []
@@ -122,14 +122,23 @@ class Limbo:
             return fn
         return register(function) if function else register
 
-    def static(self, url_prefix: str, directory: str | os.PathLike[str]) -> None:
+    def static(self, url_prefix: str, directory: str | os.PathLike[str], *,
+               index: str | None = None, cache_control: str = "public, max-age=0, must-revalidate",
+               symlinks: str = "deny") -> None:
+        """Mount a directory with explicit index and symlink policies."""
         prefix = "/" + url_prefix.strip("/")
         if prefix == "/":
             raise ValueError("Static URL prefix cannot be root")
+        if symlinks not in {"deny", "within-root"}:
+            raise ValueError("symlinks must be 'deny' or 'within-root'")
+        if index is not None and (not index or "/" in index or "\\" in index or index in {".", ".."}):
+            raise ValueError("Static index must be a single safe filename")
+        if any(existing[0] == prefix for existing in self.static_mounts):
+            raise ValueError(f"Static URL prefix already mounted: {prefix}")
         root = Path(directory).expanduser().resolve(strict=True)
         if not root.is_dir():
             raise ValueError("Static directory must be a directory")
-        self.static_mounts.append((prefix, root))
+        self.static_mounts.append((prefix, root, index, cache_control, symlinks))
 
     @staticmethod
     def html(value: str, status: int = 200, headers: dict[str, str] | None = None) -> Response:
@@ -182,9 +191,9 @@ class Limbo:
                     return endpoint(req)
                 if req.method == "OPTIONS" and allowed:
                     return Response(b"", 204, {"Allow": ", ".join(sorted(allowed | {"OPTIONS"}))})
-                for prefix, root in self.static_mounts:
+                for prefix, root, index, cache_control, symlinks in self.static_mounts:
                     if req.path == prefix or req.path.startswith(prefix + "/"):
-                        return self._serve_static(req, prefix, root)
+                        return self._serve_static(req, prefix, root, index, cache_control, symlinks)
                 for frontend in self.frontend_servers:
                     if req.path == frontend.prefix or req.path.startswith(frontend.prefix + "/"):
                         return frontend.serve(req)
@@ -213,46 +222,134 @@ class Limbo:
         if value is None: return Response(b"", 204)
         raise TypeError(f"Unsupported route return type: {type(value).__name__}")
 
-    def _serve_static(self, request: Request, prefix: str, root: Path) -> Response:
-        relative = unquote(request.path[len(prefix):]).lstrip("/")
+    @staticmethod
+    def _etag_matches(header: str, etag: str) -> bool:
+        target = etag.removeprefix("W/")
+        return any(item.strip() == "*" or item.strip().removeprefix("W/") == target
+                   for item in header.split(","))
+
+    def _serve_static(self, request: Request, prefix: str, root: Path,
+                      index: str | None = None,
+                      cache_control: str = "public, max-age=0, must-revalidate",
+                      symlinks: str = "deny") -> Response:
+        if request.method not in {"GET", "HEAD"}:
+            return Response.text("Method Not Allowed", 405, {"Allow": "GET, HEAD, OPTIONS"})
+        relative = unquote(request.path[len(prefix):].strip("/"))
         if not relative or "\\" in relative or "\x00" in relative:
             return Response.text("Not Found", 404)
-        candidate = (root / relative).resolve()
+        parts = relative.split("/")
+        if any(part in {"", ".", ".."} for part in parts):
+            return Response.text("Not Found", 404)
+        candidate = root.joinpath(*parts)
         try:
-            candidate.relative_to(root)
-        except ValueError:
+            if symlinks == "deny":
+                current = root
+                for part in parts:
+                    current = current / part
+                    if current.is_symlink():
+                        return Response.text("Not Found", 404)
+                if candidate.is_dir() and index:
+                    candidate = candidate / index
+                    if candidate.is_symlink():
+                        return Response.text("Not Found", 404)
+            else:
+                candidate = candidate.resolve(strict=True)
+                candidate.relative_to(root)
+                if candidate.is_dir() and index:
+                    candidate = (candidate / index).resolve(strict=True)
+                    candidate.relative_to(root)
+            candidate.parent.resolve(strict=True).relative_to(root)
+            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(candidate, flags)
+            file_stat = os.fstat(descriptor)
+            if not __import__("stat").S_ISREG(file_stat.st_mode):
+                os.close(descriptor)
+                return Response.text("Not Found", 404)
+        except (OSError, ValueError, RuntimeError):
             return Response.text("Not Found", 404)
-        if not candidate.is_file():
-            return Response.text("Not Found", 404)
-        stat = candidate.stat()
-        etag = '"' + hashlib.sha256(f"{stat.st_mtime_ns}:{stat.st_size}".encode()).hexdigest()[:24] + '"'
-        headers = {"ETag": etag, "Last-Modified": __import__("email.utils", fromlist=["formatdate"]).formatdate(stat.st_mtime, usegmt=True),
-                   "Cache-Control": "public, max-age=0, must-revalidate",
+
+        size = file_stat.st_size
+        from email.utils import formatdate
+        etag = f'W/"{file_stat.st_mtime_ns:x}-{size:x}-{getattr(file_stat, "st_ino", 0):x}"'
+        headers = {"ETag": etag, "Last-Modified": formatdate(file_stat.st_mtime, usegmt=True),
+                   "Cache-Control": cache_control,
                    "Content-Type": mimetypes.guess_type(candidate.name)[0] or "application/octet-stream",
                    "Accept-Ranges": "bytes"}
-        if request.headers.get("if-none-match") == etag:
-            return Response(b"", 304, headers)
-        size = stat.st_size
+
+        def close_fd():
+            try: os.close(descriptor)
+            except OSError: pass
+
+        inm = request.headers.get("if-none-match")
+        if inm is not None:
+            if self._etag_matches(inm, etag):
+                close_fd()
+                return Response(b"", 304, headers)
+        else:
+            ims = request.headers.get("if-modified-since")
+            if ims:
+                try:
+                    from email.utils import parsedate_to_datetime
+                    from datetime import timezone
+                    date = parsedate_to_datetime(ims)
+                    if date.tzinfo is None: date = date.replace(tzinfo=timezone.utc)
+                    if int(file_stat.st_mtime) <= int(date.timestamp()):
+                        close_fd()
+                        return Response(b"", 304, headers)
+                except (TypeError, ValueError, OverflowError):
+                    pass
+
         range_header = request.headers.get("range")
+        if_range = request.headers.get("if-range")
+        if range_header and if_range:
+            if if_range.startswith('"') or if_range.startswith("W/"):
+                if if_range != etag or etag.startswith("W/"): range_header = None
+            else:
+                try:
+                    from email.utils import parsedate_to_datetime
+                    from datetime import timezone
+                    date = parsedate_to_datetime(if_range)
+                    if date.tzinfo is None: date = date.replace(tzinfo=timezone.utc)
+                    if int(file_stat.st_mtime) > int(date.timestamp()): range_header = None
+                except (TypeError, ValueError, OverflowError):
+                    range_header = None
+
+        start, end, status = 0, size - 1, 200
         if range_header:
-            if not range_header.startswith("bytes=") or "," in range_header:
-                return Response(b"", 416, {**headers, "Content-Range": f"bytes */{size}"})
             try:
-                start_s, end_s = range_header[6:].split("-", 1)
-                if start_s:
-                    start = int(start_s); end = int(end_s) if end_s else size - 1
+                if not range_header.startswith("bytes=") or "," in range_header: raise ValueError
+                first, last = range_header[6:].split("-", 1)
+                if not first:
+                    suffix = int(last)
+                    if suffix <= 0 or size == 0: raise ValueError
+                    start, end = max(0, size - suffix), size - 1
                 else:
-                    suffix = int(end_s); start, end = max(0, size - suffix), size - 1
-                if start < 0 or end < start or start >= size:
-                    raise ValueError
-                end = min(end, size - 1)
-            except ValueError:
+                    start, end = int(first), int(last) if last else size - 1
+                    if start < 0 or end < start or start >= size: raise ValueError
+                    end = min(end, size - 1)
+                status = 206
+                headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+            except (ValueError, OverflowError):
+                close_fd()
                 return Response(b"", 416, {**headers, "Content-Range": f"bytes */{size}"})
-            with candidate.open("rb") as file:
-                file.seek(start); data = file.read(end - start + 1)
-            headers["Content-Range"] = f"bytes {start}-{end}/{size}"
-            return Response(data, 206, headers)
-        return Response(candidate.read_bytes(), 200, headers)
+
+        length = max(0, end - start + 1)
+        headers["Content-Length"] = str(length)
+        if status == 206: os.lseek(descriptor, start, os.SEEK_SET)
+        def stream_file():
+            remaining = length
+            try:
+                while remaining:
+                    chunk = os.read(descriptor, min(64 * 1024, remaining))
+                    if not chunk: break
+                    remaining -= len(chunk)
+                    yield chunk
+            finally:
+                close_fd()
+        if request.method == "HEAD":
+            close_fd()
+            return Response(b"", status, headers)
+        return Response(stream_file(), status, headers)
 
     def run(self, host: str = "127.0.0.1", port: int = 8000, *, request_timeout: float = 15.0,
             max_header_bytes: int = 32768, trusted_hosts: tuple[str, ...] | list[str] | None = None) -> None:
