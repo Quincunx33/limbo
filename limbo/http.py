@@ -76,6 +76,57 @@ class Request:
         return self._cookies_cache
 
 
+    def header(self, name: str, default: str | None = None) -> str | None:
+        """Get a request header without depending on dictionary key casing."""
+        wanted = name.lower()
+        return next((value for key, value in self.headers.items() if key.lower() == wanted), default)
+
+    def query(self, name: str, default: str | None = None) -> str | None:
+        """Return the first value for a query parameter."""
+        values = self.query_params.get(name)
+        return values[0] if values else default
+
+    def require_query(self, name: str) -> str:
+        """Return a required non-empty query parameter or raise HTTP 400."""
+        value = self.query(name)
+        if value is None or value == "":
+            raise HTTPError(400, f"Missing required query parameter: {name}")
+        return value
+
+    def path_param(self, name: str, default: str | None = None) -> str | None:
+        """Get a matched route parameter."""
+        return self.path_params.get(name, default)
+
+    def cookie(self, name: str, default: str | None = None) -> str | None:
+        """Get a parsed request cookie."""
+        return self.cookies.get(name, default)
+
+    def form_value(self, name: str, default: str | None = None) -> str | None:
+        """Return the first text value for a form field."""
+        try:
+            values = self.form.get(name, [])
+        except (ValueError, UnicodeError) as exc:
+            raise HTTPError(400, "Invalid form body") from exc
+        return values[0] if values else default
+
+    def file(self, name: str) -> Any | None:
+        """Return the first uploaded file for a multipart field."""
+        try:
+            values = self.files.get(name, [])
+        except (ValueError, UnicodeError) as exc:
+            raise HTTPError(400, "Invalid multipart body") from exc
+        return values[0] if values else None
+
+    def json_as(self, expected_type: type | tuple[type, ...] | None = dict) -> Any:
+        """Parse JSON with HTTP-friendly malformed-body and top-level type errors."""
+        try:
+            value = self.json
+        except ValueError as exc:
+            raise HTTPError(400, "Malformed JSON request body") from exc
+        if expected_type is not None and not isinstance(value, expected_type):
+            raise HTTPError(422, "JSON request body has an unexpected top-level type")
+        return value
+
     def accepts(self, media_type: str) -> bool:
         """Return whether the request's Accept header permits a media type."""
         requested = media_type.split(";", 1)[0].strip().lower()

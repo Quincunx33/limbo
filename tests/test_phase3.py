@@ -104,3 +104,35 @@ class SessionMiddlewareTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RequestConvenienceTests(unittest.TestCase):
+    def test_header_query_path_cookie_and_form_accessors(self):
+        request = Request("POST", "/items/7?q=first&q=second", {
+            "X-Trace": "abc", "cookie": "theme=dark",
+            "content-type": "application/x-www-form-urlencoded",
+        }, b"name=limbo")
+        request.path_params["item_id"] = "7"
+        self.assertEqual(request.header("x-trace"), "abc")
+        self.assertEqual(request.query("q"), "first")
+        self.assertEqual(request.require_query("q"), "first")
+        self.assertEqual(request.path_param("item_id"), "7")
+        self.assertEqual(request.cookie("theme"), "dark")
+        self.assertEqual(request.form_value("name"), "limbo")
+
+    def test_required_query_and_json_validation_use_http_errors(self):
+        from limbo.http import HTTPError
+        with self.assertRaises(HTTPError) as missing:
+            Request("GET", "/", {}).require_query("id")
+        self.assertEqual(missing.exception.status, 400)
+        with self.assertRaises(HTTPError) as malformed:
+            Request("POST", "/", {"content-type": "application/json"}, b"{bad").json_as()
+        self.assertEqual(malformed.exception.status, 400)
+        with self.assertRaises(HTTPError) as wrong_type:
+            Request("POST", "/", {}, b'["not","object"]').json_as(dict)
+        self.assertEqual(wrong_type.exception.status, 422)
+
+    def test_json_and_upload_accessors(self):
+        request = Request("POST", "/", {"content-type": "application/json"}, b'{"ok":true}')
+        self.assertEqual(request.json_as(), {"ok": True})
+        self.assertIsNone(request.file("missing"))
