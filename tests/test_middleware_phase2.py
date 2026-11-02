@@ -106,6 +106,18 @@ class MiddlewareTests(unittest.TestCase):
         self.assertNotIn("Content-Encoding", identity.headers)
         self.assertEqual(identity.body, payload.encode())
 
+    def test_access_log_sink_failure_does_not_replace_response(self):
+        app = Limbo()
+        def broken_sink(record):
+            raise RuntimeError("logging backend unavailable")
+        app.middleware(access_log(sink=broken_sink))
+        @app.get("/")
+        def home(req):
+            return Response.text("still served")
+        response = app.dispatch(Request("GET", "/", {}))
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.body, b"still served")
+
     def test_rate_limit_is_bounded_and_returns_retry_after(self):
         limiter = rate_limit(capacity=1, refill_rate=0.01, max_keys=2)
         request = Request("GET", "/", {}, client=("192.0.2.1", 1234))

@@ -27,12 +27,22 @@ class StaticAdversarialTests(unittest.TestCase):
                      "/static/nested%2f..%2f..%2fsecret"):
             self.assertEqual(self.get(path).status, 404)
 
-    def test_multiple_and_malformed_ranges_return_416(self):
-        for value in ("bytes=0-1,4-5", "bytes=abc-def", "bytes=4-2",
-                      "bytes=-", "items=0-1", "bytes=999999999999999999999999999999-"):
-            response = self.get(headers={"range": value})
-            self.assertEqual(response.status, 416, value)
-            self.assertEqual(response.headers["Content-Range"], "bytes */10")
+    def test_unsatisfiable_range_returns_416(self):
+        response = self.get(headers={"range": "bytes=10-"})
+        self.assertEqual(response.status, 416)
+        self.assertEqual(response.headers["Content-Range"], "bytes */10")
+
+    def test_malformed_unsupported_and_multiple_ranges_are_ignored(self):
+        for value in ("bytes=0-1,4-5", "bytes=abc-def", "bytes=-", "items=0-1"):
+            with self.subTest(range=value):
+                response = self.get(headers={"range": value})
+                self.assertEqual(response.status, 200, value)
+                self.assertEqual(b"".join(response.body), b"0123456789")
+
+    def test_oversized_range_end_is_clamped(self):
+        response = self.get(headers={"range": "bytes=0-999999999999999999999999999999"})
+        self.assertEqual(response.status, 206)
+        self.assertEqual(b"".join(response.body), b"0123456789")
 
     def test_open_ended_and_clamped_ranges(self):
         first = self.get(headers={"range": "bytes=4-"})

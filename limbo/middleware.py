@@ -145,10 +145,13 @@ def access_log(*, logger: logging.Logger | None = None,
                 "client": request.client[0] if request.client else None,
                 "request_id": request.state.get("request_id"),
             }
-            if sink is not None:
-                sink(record)
-            else:
-                target.info("request", extra={"limbo": record})
+            try:
+                if sink is not None:
+                    sink(record)
+                else:
+                    target.info("request", extra={"limbo": record})
+            except Exception:
+                target.exception("Limbo access-log sink failed")
     return middleware
 
 

@@ -308,7 +308,19 @@ class Limbo:
                 flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
                 descriptor = os.open(candidate, flags)
             file_stat = os.fstat(descriptor)
-            if not __import__("stat").S_ISREG(file_stat.st_mode):
+            stat_module = __import__("stat")
+            if stat_module.S_ISDIR(file_stat.st_mode) and symlinks == "deny" and os.open in getattr(os, "supports_dir_fd", set()):
+                if not index:
+                    os.close(descriptor)
+                    return Response.text("Not Found", 404)
+                directory_fd = descriptor
+                try:
+                    descriptor = os.open(index, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) |
+                                         getattr(os, "O_BINARY", 0), dir_fd=directory_fd)
+                finally:
+                    os.close(directory_fd)
+                file_stat = os.fstat(descriptor)
+            if not stat_module.S_ISREG(file_stat.st_mode):
                 os.close(descriptor)
                 return Response.text("Not Found", 404)
         except (OSError, ValueError, RuntimeError):

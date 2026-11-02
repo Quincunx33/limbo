@@ -106,18 +106,17 @@ The compiler contract must expose capability detection, transform inputs/outputs
 ### Phase 2 — Static files, responses and middleware completeness
 **Goal:** Make ordinary web delivery complete and safe.
 
-**Progress (2026-11-02): IN PROGRESS.** Implemented streamed static-file responses; explicit directory-index and symlink policies; path containment and final-component no-follow opening where supported; weak metadata ETags; conditional GET precedence; single byte ranges, 416 and If-Range; MIME/cache headers; response header/cookie/redirect/Vary helpers; Accept negotiation; and built-in CORS, security-header, request-ID, access-log, token-bucket rate-limit and negotiated gzip middleware. The standard-library suite currently passes 61 tests on Python 3.10–3.13. Remaining work includes stronger race-resistant directory-relative file opening across platforms, malformed/combined range and validator edge cases, middleware integration and failure-path coverage, compression policy review, documentation and broader OS testing. This phase is not complete.
+**Status: IMPLEMENTED; cross-platform CI verification pending.** Static responses stream from open descriptors. The default symlink-deny path uses directory-relative no-follow opens on platforms exposing those primitives, with a documented best-effort fallback elsewhere; within-root links are resolved and constrained to the mount. Directory indexes are opt-in. Conditional GET precedence, weak ETags, Last-Modified, single byte ranges, 416, If-Range, HEAD metadata, MIME/cache headers and response helpers are covered. Unsupported, malformed and multi-range Range fields are ignored; valid unsatisfiable byte ranges return 416, while oversized end offsets are clamped. CORS, security headers, request IDs, access logging, bounded process-local token-bucket limiting and negotiated gzip are implemented. Integration and failure-path tests cover the built-in middleware.
 
-- Response cookie helpers, safe header utilities, redirects and content negotiation primitives.
-- Correct conditional request precedence: ETag, If-None-Match, If-Modified-Since and 304 behavior.
-- Range edge cases, 416 handling, HEAD behavior and streaming backpressure.
-- MIME policy, cache policy, optional compression and directory index policy.
-- Explicit symlink policy, path containment and race-aware file opening where supported.
-- Optional SPA fallback without turning missing API routes into index.html.
-- Composable CORS, security headers, request IDs, access logging, rate limiting and exception hooks.
-- Tests for traversal, symlink behavior, malformed validators, range boundaries and large files.
+- Response cookie/header/redirect/Vary helpers and Accept negotiation.
+- Conditional GET precedence and bodyless 304 responses.
+- Single byte ranges; unsupported/malformed/multiple ranges ignored; unsatisfiable ranges return 416.
+- MIME/cache policy, optional gzip, opt-in directory indexes and symlink policy.
+- Directory-relative no-follow traversal where supported; platform fallback limitations documented.
+- CORS, security headers, request IDs, access logging, rate limiting and gzip middleware.
+- Adversarial tests for traversal, symlinks, validators, range boundaries, streaming and middleware failures.
 
-**Exit gate:** static and streamed responses pass adversarial tests and documented behavior matches the implementation.
+**Exit gate:** Python 3.10–3.13 unit matrix and Linux/Windows/macOS smoke matrix pass. This is not independent security certification.
 
 ### Phase 3 — Backend application essentials
 **Goal:** Make Limbo useful for real multi-user applications.
