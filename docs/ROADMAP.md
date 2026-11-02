@@ -106,6 +106,8 @@ The compiler contract must expose capability detection, transform inputs/outputs
 ### Phase 2 — Static files, responses and middleware completeness
 **Goal:** Make ordinary web delivery complete and safe.
 
+**Progress (2026-11-02): IN PROGRESS.** The first static-delivery slice adds streamed file responses, explicit directory-index and symlink policies, path containment checks, weak metadata ETags, conditional GET precedence, single byte-range handling including 416, If-Range behavior, MIME/cache headers, and response header/cookie helpers. Adversarial and regression coverage is being expanded; compression, broader middleware utilities, content negotiation, and full platform/race testing remain open. This phase is not complete.
+
 - Response cookie helpers, safe header utilities, redirects and content negotiation primitives.
 - Correct conditional request precedence: ETag, If-None-Match, If-Modified-Since and 304 behavior.
 - Range edge cases, 416 handling, HEAD behavior and streaming backpressure.
