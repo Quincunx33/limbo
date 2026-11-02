@@ -26,9 +26,12 @@ class StaticDeliveryTests(unittest.TestCase):
         self.assertEqual(response.headers["Content-Type"], "text/plain")
         self.assertTrue(response.headers["ETag"].startswith('W/"'))
         self.assertEqual(b"".join(response.body), b"0123456789")
-        self.assertEqual(self.request(headers={"if-none-match": response.headers["ETag"]}).status, 304)
-        self.assertEqual(self.request(headers={"if-none-match": '"different"',
-                                               "if-modified-since": response.headers["Last-Modified"]}).status, 200)
+        not_modified = self.request(headers={"if-none-match": response.headers["ETag"]})
+        self.assertEqual(not_modified.status, 304)
+        updated = self.request(headers={"if-none-match": '"different"',
+                                        "if-modified-since": response.headers["Last-Modified"]})
+        self.assertEqual(updated.status, 200)
+        updated.close()
 
     def test_ranges_and_if_range(self):
         partial = self.request(headers={"range": "bytes=-3"})
@@ -39,6 +42,7 @@ class StaticDeliveryTests(unittest.TestCase):
         self.assertEqual(self.request(headers={"range": "bytes=10-"}).status, 416)
         self.assertEqual(self.request("/assets/empty.txt", {"range": "bytes=0-"}).status, 416)
         first = self.request()
+        first.close()
         full = self.request(headers={"range": "bytes=0-1", "if-range": first.headers["ETag"]})
         self.assertEqual(full.status, 200)
         self.assertEqual(b"".join(full.body), b"0123456789")

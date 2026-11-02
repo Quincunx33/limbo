@@ -121,6 +121,12 @@ class Response:
         if isinstance(self.body, str):
             self.body = self.body.encode("utf-8")
 
+    def close(self) -> None:
+        """Close an unconsumed streaming body and release its resources."""
+        close = getattr(self.body, "close", None)
+        if callable(close):
+            close()
+
     def set_header(self, name: str, value: str) -> "Response":
         token = "!#$%&'*+-.^\u0060|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
         value = str(value)

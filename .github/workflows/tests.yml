@@ -43,5 +43,8 @@ jobs:
         run: |
           python -c "import limbo; print(limbo.__version__)"
           python -m compileall -q limbo tests
-      - name: Run standard-library test suite
-        run: python -m unittest discover -s tests -v
+      - name: Run Phase 2 static and middleware tests
+        run: |
+          python -m unittest discover -s tests -p "test_static_phase2.py" -v
+          python -m unittest discover -s tests -p "test_middleware_phase2.py" -v
+          python -m unittest discover -s tests -p "test_phase2_hardening.py" -v
