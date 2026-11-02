@@ -17,6 +17,7 @@ from typing import Any
 from urllib.parse import quote, unquote
 
 from .http import Request, Response
+from .frontend_scanner import scan_imports
 
 
 EXTENSIONS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".json")
@@ -270,6 +271,7 @@ class DependencyGraph:
         self.edges: dict[Path, set[Path]] = {}
         self.reverse: dict[Path, set[Path]] = {}
         self.bare_imports: dict[Path, set[str]] = {}
+        self.diagnostics: dict[Path, tuple[str, ...]] = {}
 
     def build(self, entry: str | os.PathLike[str], *, transform=None) -> dict[Path, set[Path]]:
         resolved_entry = self.resolver._resolve_path(self.resolver.root / entry)
@@ -290,9 +292,13 @@ class DependencyGraph:
                 raise FrontendError(f"Cannot read frontend module {current}: {exc}") from exc
             local_edges: set[Path] = set()
             bare: set[str] = set()
-            scan_source = re.sub(r"/\*[\s\S]*?\*/", "", source)
-            scan_source = re.sub(r"(?m)^\s*//.*$", "", scan_source)
-            for specifier in dict.fromkeys(IMPORT_RE.findall(scan_source)):
+            try:
+                scan = scan_imports(source)
+            except ValueError as exc:
+                raise FrontendError(f"Cannot scan imports in {current}: {exc}") from exc
+            self.diagnostics[current] = scan.diagnostics
+            for reference in scan.imports:
+                specifier = reference.specifier
                 if specifier.startswith(("http://", "https://", "data:")):
                     continue
                 if not specifier.startswith(("./", "../", "/", "#")):
@@ -322,6 +328,7 @@ class DependencyGraph:
                 self.reverse.get(dependency, set()).discard(module)
             self.reverse.pop(module, None)
             self.bare_imports.pop(module, None)
+            self.diagnostics.pop(module, None)
         return affected
 
 
