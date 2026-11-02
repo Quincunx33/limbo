@@ -125,9 +125,11 @@ The compiler contract must expose capability detection, transform inputs/outputs
 ### Phase 3 — Backend application essentials
 **Goal:** Make Limbo useful for real multi-user applications.
 
-**Status: IN PROGRESS (2026-11-02).** Phase 3 implementation begins with bounded server-side session storage and session middleware. The session cookie contains only a high-entropy opaque identifier; session data remains server-side. Session IDs can be explicitly rotated after authentication/privilege changes and revoked on logout. This first vertical slice is process-local and is not a distributed or persistent session backend.
+**Status: IN PROGRESS (2026-11-02).** Implemented so far: bounded process-local server-side sessions with opaque HttpOnly cookies, explicit ID rotation and revocation; signed double-submit CSRF middleware; request convenience accessors and JSON 400/422 validation; multipart file/field quotas and safe exclusive chunked persistence; optional exact WebSocket Origin allowlists checked before upgrade; bounded in-process background tasks with cancellation/error reporting; synchronous startup/shutdown hooks; and task cleanup during app shutdown. The session store is intentionally process-local/non-persistent. Multipart parsing still buffers the bounded HTTP request body before parsing; socket-to-disk streaming is not yet implemented.
 
-**Acceptance work remaining:** request accessors and validation responses; bounded upload streaming/persistence lifecycle; CSRF tokens and authentication/authorization extension points; WebSocket Origin and lifecycle policies; bounded background tasks with cancellation and shutdown; structured logging and app lifecycle hooks; integration/failure tests and examples.
+**Verification in progress:** new session, CSRF, request, upload, task and lifecycle tests are included in the standard-library suite. CI is running against the current branch head; Phase 3 remains open until all matrix jobs pass and the remaining acceptance work is complete.
+
+**Acceptance work remaining:** true streaming multipart ingestion and cleanup tests; configurable upload limits wired through the application/server; authentication/authorization extension points and examples; WebSocket timeout/size policy configuration and lifecycle failure coverage; session expiry/concurrency tests and adapter contract for persistent stores; stronger background-task shutdown/error-path tests; docs and end-to-end login/upload/WebSocket/task examples.
 
 
 - Request API consistency: query, path, headers, cookies, JSON, forms, multipart and validation errors.

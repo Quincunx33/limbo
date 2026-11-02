@@ -39,12 +39,44 @@ app.run(port=8000)
 - Direct TCP server, concurrent client threads, HTTP/1.0 and HTTP/1.1 request parsing, bounded headers/body, Content-Length and chunked request bodies, keep-alive, HEAD response body suppression, and clean connection close.
 - Ordered onion-style middleware.
 - Static file mounts with traversal containment, ETag, Last-Modified, cache headers, If-None-Match and single byte-range responses.
-- Escaped `string.Template` HTML rendering, multipart fields and upload objects with non-overwriting save, streamed file responses, and a small serialized-connection SQLite helper with rollback-capable transactions.
-- Password hashing with `hashlib.scrypt`, constant-time verification, HMAC-signed expiring stateless sessions, and secure cookie formatting helpers.
-- Basic RFC 6455 WebSocket upgrade, masked client frame validation, text/binary messages, continuation frames, ping/pong, close handling, and message-size limits.
+- Escaped `string.Template` HTML rendering; bounded multipart parsing with file/field quotas; safe upload names, exclusive no-overwrite persistence and chunked file writes; streamed file responses; and a small serialized-connection SQLite helper with rollback-capable transactions.
+- Password hashing with `hashlib.scrypt`, constant-time verification, HMAC-signed expiring stateless session tokens, secure cookie formatting helpers, and optional bounded server-side in-memory sessions with ID rotation/revocation.
+- Basic RFC 6455 WebSocket upgrade, masked client frame validation, text/binary messages, continuation frames, ping/pong, close handling and message-size limits; optional exact per-route Origin allowlists.
 - Local frontend module preview with safe project-contained resolution, `tsconfig.json` path aliases, package `exports`/`imports` conditional resolution, browser import maps, dependency graph traversal and invalidation. Hidden files and unapproved asset types are not served.
 - Optional esbuild transform for TypeScript/JSX/TSX; optional Vue SFC and Svelte SFC compilers run locally through Node.js. Vue/Svelte outputs are served as modules with generated styles attached. Tools are detected, never installed by Limbo.
 - `limbo create`, `dev`, `start`, `doctor`, `info`, `dependencies`; an explicit not-implemented response for `build`.
+
+- Signed double-submit CSRF middleware for browser requests, including header and URL-encoded form tokens.
+- Bounded local background task execution with cancellation, error reporting, and graceful shutdown; synchronous application startup/shutdown hooks.
+- Request convenience accessors for headers, query/path parameters, cookies, forms and files, plus JSON type validation with HTTP 400/422 errors.
+
+## Phase 3 backend building blocks (experimental)
+
+Session middleware stores session data on the server and sends only a random opaque ID in an HttpOnly cookie. The built-in SessionStore is bounded and process-local: sessions are lost on restart and are not shared across multiple worker processes. Rotate the ID after authentication or privilege changes, and destroy it on logout.
+
+~~~python
+import os
+from limbo import Limbo, SessionStore, session_middleware, csrf_protect
+
+app = Limbo()
+app.middleware(session_middleware(SessionStore(), secure=True))
+app.middleware(csrf_protect(os.environ["LIMBO_CSRF_SECRET"], secure=True))
+
+@app.post("/login")
+def login(request):
+    request.session["user_id"] = 123
+    request.session.regenerate()
+    return {"ok": True}
+
+@app.post("/logout")
+def logout(request):
+    request.session.destroy()
+    return {"ok": True}
+~~~
+
+For unsafe browser requests, send the readable CSRF cookie token in the X-CSRF-Token header, or use the _csrf field in URL-encoded forms. Multipart requests should use the header. Do not expose the CSRF secret in source control.
+
+BackgroundTasks is available as app.background_tasks; it bounds running plus queued work and shuts down with the app. It is not a durable queue. Use @app.on_startup and @app.on_shutdown for synchronous resource lifecycle hooks. WebSocket routes can opt into exact Origin checks with @app.websocket("/ws", origins=("https://app.example",)).
 
 ## Frontend preview
 
@@ -66,7 +98,7 @@ Framework adapters are intentionally partial: React TSX syntax can be transforme
 
 ## Not implemented (do not assume support)
 
-Full React runtime integration, HMR, persistent compiler caching, CSS modules, general CSS import processing, production build optimization, code splitting, framework SSR, full standards-compliant proxy/host validation, CSRF protection, an integrated login/authorization system, database migrations/pooling, configuration loading from TOML, Cloudflare Tunnel management, route groups, and named tunnel lifecycle are not implemented. WebSockets do not support extensions/compression or application-level Origin policy; configure an allowlist in application code before exposing a WebSocket endpoint. Node.js and cloudflared are not used or downloaded by the core. `limbo dev --public` is not available.
+Full React runtime integration, HMR, persistent compiler caching, CSS modules, general CSS import processing, production build optimization, code splitting, framework SSR, an integrated login/authorization system, persistent/shared session adapters, database migrations/pooling, configuration loading from TOML, Cloudflare Tunnel management, and named tunnel lifecycle are not implemented. Multipart parsing still receives the bounded request body in memory; a true socket-to-disk streaming parser remains future work. Background tasks are in-process and non-durable. WebSockets do not support extensions/compression; Origin checks are opt-in per route. Node.js and cloudflared are not used or downloaded by the core. `limbo dev --public` is not available.
 
 ## Static delivery and middleware
 
@@ -82,7 +114,7 @@ python -m unittest discover -s tests -v
 
 ## Security note
 
-This is an early release. Keep it bound to localhost while evaluating. Session payloads are signed but **not encrypted**, so do not place secrets in them. Password hashing uses scrypt with a fixed conservative default; assess resource policy for your deployment. The built-in static server checks resolved paths remain within the configured root; it does not promise a comprehensive security boundary against every filesystem race, malformed HTTP edge case, or hostile deployment environment. Set an upstream reverse proxy and review the code before any public deployment.
+This is an early release. Keep it bound to localhost while evaluating. Stateless SessionSigner payloads are signed but **not encrypted**, so do not place secrets in them. The optional in-memory SessionStore keeps data server-side but is process-local and non-persistent. Password hashing uses scrypt with a fixed conservative default; assess resource policy for your deployment. The built-in static server checks resolved paths remain within the configured root; it does not promise a comprehensive security boundary against every filesystem race, malformed HTTP edge case, or hostile deployment environment. Set an upstream reverse proxy and review the code before any public deployment.
 
 
 See [Static delivery and middleware](docs/STATIC_AND_MIDDLEWARE.md) for static mounts, conditional/range responses, middleware, compression and SPA fallback behavior.
