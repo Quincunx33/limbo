@@ -135,7 +135,7 @@ const meta = import.meta.url;
             root = Path(temp)
             path = root / "entry.ts"
             path.write_text("const value: number = 1;", encoding="utf-8")
-            adapter = EsbuildAdapter(root, executable="esbuild")
+            adapter = EsbuildAdapter(root, executable="esbuild", jsx_import_source="preact")
             map_data = base64.b64encode(b'{"version":3,"sources":["entry.ts"]}').decode("ascii")
             emitted = "const value = 1;\\n//# sourceMappingURL=data:application/json;base64," + map_data
             completed = SimpleNamespace(returncode=0, stdout=emitted, stderr="")
@@ -146,6 +146,7 @@ const meta = import.meta.url;
             self.assertEqual(run.call_args.kwargs["input"], "const value: number = 1;")
             self.assertIn("--loader=ts", run.call_args.args[0])
             self.assertIn("--sourcemap=inline", run.call_args.args[0])
+            self.assertIn("--jsx-import-source=preact", run.call_args.args[0])
 
     def test_registry_manifest_is_stable_json_and_selects_by_extension(self):
         registry = AdapterRegistry((BrowserNativeAdapter(),))
