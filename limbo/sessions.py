@@ -8,7 +8,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import MutableMapping
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Protocol, runtime_checkable
 
 from .http import Request, Response
 
@@ -16,6 +16,7 @@ from .http import Request, Response
 _SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{43}$")
 
 
+@runtime_checkable
 class SessionBackend(Protocol):
     """Structural contract for persistent or shared session adapters.
 
