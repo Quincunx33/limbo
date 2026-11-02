@@ -32,7 +32,7 @@ class Limbo:
         self.router = Router()
         self.middlewares: list[Callable] = []
         self.static_mounts: list[tuple[str, Path, str | None, str, str, str | None]] = []
-        self.websocket_routes: list[tuple[object, Callable, tuple[str, ...] | None]] = []
+        self.websocket_routes: list[tuple[object, Callable, tuple[str, ...] | None, int, float | None]] = []
         self.templates = TemplateEngine()
         self.frontend_servers: list[FrontendDevServer] = []
         self.max_body_bytes = max_body_bytes
@@ -94,8 +94,14 @@ class Limbo:
     def patch(self, path: str, **kwargs): return self.route(path, ("PATCH",), **kwargs)
     def delete(self, path: str, **kwargs): return self.route(path, ("DELETE",), **kwargs)
 
-    def websocket(self, path: str, *, origins: tuple[str, ...] | list[str] | None = None):
-        """Register a WebSocket route with an optional exact Origin allowlist."""
+    def websocket(self, path: str, *, origins: tuple[str, ...] | list[str] | None = None,
+                  max_message_bytes: int = 8 * 1024 * 1024,
+                  idle_timeout: float | None = 60.0):
+        """Register a WebSocket route with explicit Origin, message and idle policies."""
+        if not isinstance(max_message_bytes, int) or max_message_bytes < 1:
+            raise ValueError("max_message_bytes must be a positive integer")
+        if idle_timeout is not None and (not isinstance(idle_timeout, (int, float)) or idle_timeout <= 0):
+            raise ValueError("idle_timeout must be positive or None")
         allowed_origins = None if origins is None else tuple(origins)
         if allowed_origins is not None:
             if not allowed_origins:
@@ -114,18 +120,25 @@ class Limbo:
                     raise ValueError("WebSocket origins must be exact HTTP(S) origins")
         def decorate(handler):
             pattern = compile_path(path)
-            if any(existing.pattern == pattern.pattern for existing, _, _ in self.websocket_routes):
+            if any(existing.pattern == pattern.pattern for existing, _, _, _, _ in self.websocket_routes):
                 raise ValueError(f"Duplicate WebSocket route: {path}")
-            self.websocket_routes.append((pattern, handler, allowed_origins))
+            self.websocket_routes.append((pattern, handler, allowed_origins, max_message_bytes, idle_timeout))
             return handler
         return decorate
 
     def websocket_origin_allowed(self, request: Request) -> bool:
         """Check a matching WebSocket route's configured Origin policy."""
-        for pattern, _, origins in self.websocket_routes:
+        for pattern, _, origins, _, _ in self.websocket_routes:
             if pattern.fullmatch(request.path):
                 return origins is None or request.headers.get("origin") in origins
         return True
+
+    def websocket_options(self, request: Request) -> dict[str, object]:
+        """Return configured transport limits for the matching route."""
+        for pattern, _, _, max_message_bytes, idle_timeout in self.websocket_routes:
+            if pattern.fullmatch(request.path):
+                return {"max_message_bytes": max_message_bytes, "idle_timeout": idle_timeout}
+        return {}
 
     def render_template(self, template_name: str, **context) -> Response:
         return self.html(self.templates.render(template_name, context))
@@ -148,7 +161,7 @@ class Limbo:
         return frontend.script_tag(entry)
 
     def dispatch_websocket(self, request: Request, websocket) -> None:
-        for pattern, handler, _ in self.websocket_routes:
+        for pattern, handler, _, _, _ in self.websocket_routes:
             match = pattern.fullmatch(request.path)
             if match:
                 request.path_params = match.groupdict()
@@ -504,7 +517,8 @@ class Limbo:
         server = LimboServer(self.dispatch, host, port, request_timeout=request_timeout,
                              max_header_bytes=max_header_bytes, max_body_bytes=self.max_body_bytes,
                              trusted_hosts=trusted_hosts, websocket_handler=self.dispatch_websocket if self.websocket_routes else None,
-                             websocket_origin_check=self.websocket_origin_allowed)
+                             websocket_origin_check=self.websocket_origin_allowed,
+                             websocket_options=self.websocket_options)
         self._server = server
         try:
             for hook in self.startup_hooks:
