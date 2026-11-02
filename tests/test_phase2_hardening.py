@@ -29,7 +29,7 @@ class StaticAdversarialTests(unittest.TestCase):
 
     def test_multiple_and_malformed_ranges_return_416(self):
         for value in ("bytes=0-1,4-5", "bytes=abc-def", "bytes=4-2",
-                      "bytes=-", "items=0-1", "bytes=0-999999999999999999999999999999"):
+                      "bytes=-", "items=0-1", "bytes=999999999999999999999999999999-"):
             response = self.get(headers={"range": value})
             self.assertEqual(response.status, 416, value)
             self.assertEqual(response.headers["Content-Range"], "bytes */10")

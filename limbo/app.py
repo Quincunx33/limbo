@@ -259,19 +259,25 @@ class Limbo:
                         if current_fd != root_fd:
                             os.close(current_fd)
                         current_fd = next_fd
-                    try:
+                    if index:
+                        try:
+                            directory_fd = os.open(parts[-1], os.O_RDONLY | directory_flag | nofollow |
+                                                    getattr(os, "O_BINARY", 0), dir_fd=current_fd)
+                        except NotADirectoryError:
+                            directory_fd = None
+                        if directory_fd is not None:
+                            try:
+                                descriptor = os.open(index, os.O_RDONLY | nofollow |
+                                                     getattr(os, "O_BINARY", 0), dir_fd=directory_fd)
+                            finally:
+                                os.close(directory_fd)
+                            candidate = candidate / index
+                        else:
+                            descriptor = os.open(parts[-1], os.O_RDONLY | nofollow |
+                                                 getattr(os, "O_BINARY", 0), dir_fd=current_fd)
+                    else:
                         descriptor = os.open(parts[-1], os.O_RDONLY | nofollow |
                                              getattr(os, "O_BINARY", 0), dir_fd=current_fd)
-                    except IsADirectoryError:
-                        if not index:
-                            raise
-                        directory_fd = os.open(parts[-1], os.O_RDONLY | directory_flag | nofollow |
-                                                getattr(os, "O_BINARY", 0), dir_fd=current_fd)
-                        try:
-                            descriptor = os.open(index, os.O_RDONLY | nofollow |
-                                                 getattr(os, "O_BINARY", 0), dir_fd=directory_fd)
-                        finally:
-                            os.close(directory_fd)
                 finally:
                     if current_fd != root_fd:
                         os.close(current_fd)
