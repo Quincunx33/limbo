@@ -225,9 +225,10 @@ def gzip_compress(*, minimum_size: int = 500, level: int = 6) -> Callable:
             compressor = zlib.compressobj(level, zlib.DEFLATED, 16 + zlib.MAX_WBITS)
             response.body = compressor.compress(response.body) + compressor.flush()
         else:
+            source_body = response.body
             def compressed_chunks():
                 compressor = zlib.compressobj(level, zlib.DEFLATED, 16 + zlib.MAX_WBITS)
-                for chunk in response.body:
+                for chunk in source_body:
                     if not isinstance(chunk, bytes):
                         raise TypeError("Streaming response chunks must be bytes")
                     output = compressor.compress(chunk)
