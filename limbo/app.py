@@ -16,6 +16,42 @@ from .templates import TemplateEngine
 from .tasks import BackgroundTasks
 
 
+class _FileDescriptorStream:
+    """Close an eagerly opened file descriptor even if iteration never starts."""
+
+    def __init__(self, descriptor: int, length: int, chunk_size: int = 64 * 1024) -> None:
+        self.descriptor = descriptor
+        self.remaining = length
+        self.chunk_size = chunk_size
+
+    def __iter__(self):
+        return self
+
+    def __next__(self) -> bytes:
+        if self.descriptor is None or self.remaining <= 0:
+            self.close()
+            raise StopIteration
+        try:
+            chunk = os.read(self.descriptor, min(self.chunk_size, self.remaining))
+        except Exception:
+            self.close()
+            raise
+        if not chunk:
+            self.close()
+            raise StopIteration
+        self.remaining -= len(chunk)
+        return chunk
+
+    def close(self) -> None:
+        descriptor = self.descriptor
+        self.descriptor = None
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
 class Limbo:
     def __init__(self, *, name: str = "Limbo", max_body_bytes: int = 8 * 1024 * 1024,
                  max_upload_file_bytes: int = 8 * 1024 * 1024,
@@ -498,20 +534,10 @@ class Limbo:
         length = max(0, end - start + 1)
         headers["Content-Length"] = str(length)
         if status == 206: os.lseek(descriptor, start, os.SEEK_SET)
-        def stream_file():
-            remaining = length
-            try:
-                while remaining:
-                    chunk = os.read(descriptor, min(64 * 1024, remaining))
-                    if not chunk: break
-                    remaining -= len(chunk)
-                    yield chunk
-            finally:
-                close_fd()
         if request.method == "HEAD":
             close_fd()
             return Response(b"", status, headers)
-        return Response(stream_file(), status, headers)
+        return Response(_FileDescriptorStream(descriptor, length), status, headers)
 
     def run(self, host: str = "127.0.0.1", port: int = 8000, *, request_timeout: float = 15.0,
             max_header_bytes: int = 32768, trusted_hosts: tuple[str, ...] | list[str] | None = None) -> None:
