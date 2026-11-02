@@ -255,6 +255,7 @@ class Limbo:
 
     def dispatch(self, request: Request) -> Response:
         if len(request.body) > self.max_body_bytes:
+            request.close_uploads()
             return Response.text("Request body too large", 413)
         request._multipart_limits = self.upload_limits
         try:
