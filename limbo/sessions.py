@@ -8,12 +8,25 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import MutableMapping
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
 from .http import Request, Response
 
 
 _SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{43}$")
+
+
+class SessionBackend(Protocol):
+    """Structural contract for persistent or shared session adapters.
+
+    Implementations expose a cookie max_age and atomic per-ID load/save/delete
+    operations. Values returned by load must be isolated from internal storage.
+    """
+    max_age: int
+
+    def load(self, session_id: str | None) -> dict[str, Any] | None: ...
+    def save(self, session_id: str, data: dict[str, Any]) -> None: ...
+    def delete(self, session_id: str | None) -> None: ...
 
 
 class SessionStore:
@@ -114,7 +127,7 @@ class Session(MutableMapping[str, Any]):
         return len(self._data)
 
 
-def session_middleware(store: SessionStore | None = None, *, cookie_name: str = "limbo_session",
+def session_middleware(store: SessionBackend | None = None, *, cookie_name: str = "limbo_session",
                        secure: bool = True, same_site: str = "Lax", path: str = "/") -> Callable:
     """Load a server-side session and persist changes after the response.
 
