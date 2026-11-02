@@ -10,8 +10,7 @@ from urllib.parse import unquote
 
 from .http import HTTPError, Request, Response
 from .frontend import FrontendDevServer
-from .router import Router
-from .router import compile_path
+from .router import RouteGroup, Router, compile_path
 from .server import LimboServer
 from .templates import TemplateEngine
 
@@ -27,10 +26,24 @@ class Limbo:
         self.frontend_servers: list[FrontendDevServer] = []
         self.max_body_bytes = max_body_bytes
 
-    def route(self, path: str, methods: tuple[str, ...] = ("GET",), *, name: str | None = None):
+    @property
+    def routes(self) -> list[dict[str, object]]:
+        """Return a snapshot of registered HTTP route metadata."""
+        return self.router.describe()
+
+    def url_for(self, name: str, **parameters: object) -> str:
+        """Build a URL from a named route and its path parameters."""
+        return self.router.url_for(name, **parameters)
+
+    def group(self, prefix: str = "", *, name: str | None = None) -> RouteGroup:
+        """Create a route group that shares this application's router."""
+        return RouteGroup(self.router, prefix=prefix, name=name)
+
+    def route(self, path: str, methods: tuple[str, ...] = ("GET",), *,
+              name: str | None = None, priority: int = 0):
         def decorate(handler):
             for method in methods:
-                self.router.add(method, path, handler, name=name)
+                self.router.add(method, path, handler, name=name, priority=priority)
             return handler
         return decorate
 
