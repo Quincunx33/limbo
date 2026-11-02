@@ -76,6 +76,35 @@ class Request:
         return self._cookies_cache
 
 
+    def accepts(self, media_type: str) -> bool:
+        """Return whether the request's Accept header permits a media type."""
+        requested = media_type.split(";", 1)[0].strip().lower()
+        if "/" not in requested:
+            raise ValueError("media_type must be a type/subtype value")
+        accept = self.headers.get("accept")
+        if not accept:
+            return True
+        best_specificity, best_quality = -1, 0.0
+        for item in accept.split(","):
+            pieces = [part.strip() for part in item.split(";")]
+            pattern = pieces[0].lower()
+            quality = 1.0
+            for parameter in pieces[1:]:
+                if parameter.lower().startswith("q="):
+                    try: quality = float(parameter[2:])
+                    except ValueError: quality = 0.0
+            if not 0.0 <= quality <= 1.0: quality = 0.0
+            specificity = (2 if pattern == requested else
+                           1 if pattern.endswith("/*") and requested.startswith(pattern[:-1]) else
+                           0 if pattern == "*/*" else -1)
+            if specificity > best_specificity:
+                best_specificity, best_quality = specificity, quality
+            elif specificity == best_specificity:
+                best_quality = max(best_quality, quality)
+        return best_specificity >= 0 and best_quality > 0
+
+
+
 _UNSET = object()
 
 
@@ -97,7 +126,7 @@ class Response:
         value = str(value)
         if not name or any(char not in token for char in name):
             raise ValueError("Invalid response header name")
-        if any(ord(char) < 0x20 and char != "\\t" or ord(char) == 0x7f for char in value):
+        if any(ord(char) < 0x20 and char != "\t" or ord(char) == 0x7f for char in value):
             raise ValueError("Invalid response header value")
         existing = next((key for key in self.headers if key.lower() == name.lower()), None)
         if existing is not None: del self.headers[existing]
@@ -126,32 +155,6 @@ class Response:
         self.cookies.append(morsel.OutputString())
         return self
 
-    def accepts(self, media_type: str) -> bool:
-        """Return whether the request's Accept header permits a media type."""
-        requested = media_type.split(";", 1)[0].strip().lower()
-        if "/" not in requested:
-            raise ValueError("media_type must be a type/subtype value")
-        accept = self.headers.get("accept")
-        if not accept:
-            return True
-        best = -1.0
-        for item in accept.split(","):
-            pieces = [part.strip() for part in item.split(";")]
-            pattern = pieces[0].lower()
-            quality = 1.0
-            for parameter in pieces[1:]:
-                if parameter.lower().startswith("q="):
-                    try: quality = float(parameter[2:])
-                    except ValueError: quality = 0.0
-            if not 0.0 <= quality <= 1.0: quality = 0.0
-            if pattern == requested:
-                best = max(best, quality)
-            elif pattern == "*/*":
-                best = max(best, quality)
-            elif pattern.endswith("/*") and requested.startswith(pattern[:-1]):
-                best = max(best, quality)
-        return best > 0
-
     def add_vary(self, *names: str) -> "Response":
         current_key = next((key for key in self.headers if key.lower() == "vary"), None)
         existing = [] if current_key is None else [part.strip() for part in self.headers[current_key].split(",")]
@@ -160,7 +163,7 @@ class Response:
             if name == "*":
                 existing = ["*"]
                 break
-            if not name or any(char in name for char in ",\\r\\n"):
+            if not name or any(char in name for char in ",\r\n"):
                 raise ValueError("Invalid Vary field name")
             if name.lower() not in seen:
                 existing.append(name)
