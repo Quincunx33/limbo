@@ -241,31 +241,74 @@ class Limbo:
         if any(part in {"", ".", ".."} for part in parts):
             return Response.text("Not Found", 404)
         candidate = root.joinpath(*parts)
+        descriptor = None
         try:
-            if symlinks == "deny":
-                current = root
-                for part in parts:
-                    current = current / part
-                    if current.is_symlink():
-                        return Response.text("Not Found", 404)
-                if candidate.is_dir() and index:
+            if symlinks == "deny" and os.open in getattr(os, "supports_dir_fd", set()):
+                # Open each path component relative to a trusted directory FD.
+                # O_NOFOLLOW on every component prevents symlink-swap traversal.
+                nofollow = getattr(os, "O_NOFOLLOW", 0)
+                directory_flag = getattr(os, "O_DIRECTORY", 0)
+                if not nofollow or not directory_flag:
+                    raise OSError("No race-resistant no-follow directory traversal")
+                root_fd = os.open(root, os.O_RDONLY | directory_flag | getattr(os, "O_BINARY", 0))
+                current_fd = root_fd
+                try:
+                    for part in parts[:-1]:
+                        next_fd = os.open(part, os.O_RDONLY | directory_flag | nofollow |
+                                          getattr(os, "O_BINARY", 0), dir_fd=current_fd)
+                        if current_fd != root_fd:
+                            os.close(current_fd)
+                        current_fd = next_fd
+                    try:
+                        descriptor = os.open(parts[-1], os.O_RDONLY | nofollow |
+                                             getattr(os, "O_BINARY", 0), dir_fd=current_fd)
+                    except IsADirectoryError:
+                        if not index:
+                            raise
+                        directory_fd = os.open(parts[-1], os.O_RDONLY | directory_flag | nofollow |
+                                                getattr(os, "O_BINARY", 0), dir_fd=current_fd)
+                        try:
+                            descriptor = os.open(index, os.O_RDONLY | nofollow |
+                                                 getattr(os, "O_BINARY", 0), dir_fd=directory_fd)
+                        finally:
+                            os.close(directory_fd)
+                finally:
+                    if current_fd != root_fd:
+                        os.close(current_fd)
+                    os.close(root_fd)
+                if index and os.path.isdir(candidate):
                     candidate = candidate / index
-                    if candidate.is_symlink():
-                        return Response.text("Not Found", 404)
             else:
-                candidate = candidate.resolve(strict=True)
-                candidate.relative_to(root)
-                if candidate.is_dir() and index:
-                    candidate = (candidate / index).resolve(strict=True)
+                # Portable fallback: containment checks and final-component
+                # O_NOFOLLOW. Platforms without dir_fd traversal cannot offer
+                # the same protection against intermediate-component races.
+                if symlinks == "deny":
+                    current = root
+                    for part in parts:
+                        current = current / part
+                        if current.is_symlink():
+                            return Response.text("Not Found", 404)
+                    if candidate.is_dir() and index:
+                        candidate = candidate / index
+                        if candidate.is_symlink():
+                            return Response.text("Not Found", 404)
+                else:
+                    candidate = candidate.resolve(strict=True)
                     candidate.relative_to(root)
-            candidate.parent.resolve(strict=True).relative_to(root)
-            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
-            descriptor = os.open(candidate, flags)
+                    if candidate.is_dir() and index:
+                        candidate = (candidate / index).resolve(strict=True)
+                        candidate.relative_to(root)
+                candidate.parent.resolve(strict=True).relative_to(root)
+                flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+                descriptor = os.open(candidate, flags)
             file_stat = os.fstat(descriptor)
             if not __import__("stat").S_ISREG(file_stat.st_mode):
                 os.close(descriptor)
                 return Response.text("Not Found", 404)
         except (OSError, ValueError, RuntimeError):
+            if descriptor is not None:
+                try: os.close(descriptor)
+                except OSError: pass
             return Response.text("Not Found", 404)
 
         size = file_stat.st_size
