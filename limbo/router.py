@@ -40,9 +40,15 @@ def compile_path(path: str) -> re.Pattern[str]:
     return re.compile("^" + "".join(pieces) + "$")
 
 
-def _specificity(path: str) -> tuple[int, int]:
+def _specificity(path: str) -> tuple[int, int, int]:
     parameters = len(re.findall(r"\{[A-Za-z_][A-Za-z0-9_]*\}", path))
-    return (len(path) - parameters * 2, -parameters)
+    static_segments = sum(1 for segment in path.split("/") if segment and "{" not in segment)
+    return (static_segments, len(path) - parameters * 2, -parameters)
+
+
+def _route_signature(path: str) -> str:
+    """Normalize parameter names so /users/{id} conflicts with /users/{slug}."""
+    return re.sub(r"\{[A-Za-z_][A-Za-z0-9_]*\}", "{}", path)
 
 
 class Router:
@@ -60,7 +66,7 @@ class Router:
         if not isinstance(priority, int):
             raise TypeError("Route priority must be an integer")
         for route in self.routes:
-            if route.method == method and route.pattern.pattern == pattern.pattern:
+            if route.method == method and _route_signature(route.path) == _route_signature(path):
                 raise ValueError(f"Conflicting route: {method} {path} conflicts with {route.path}")
             if name and route.name == name and route.path != path:
                 raise ValueError(f"Route name already used for another path: {name}")
