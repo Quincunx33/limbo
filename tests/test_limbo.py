@@ -67,6 +67,47 @@ class AppTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.app.get("/same")(lambda req: "b")
 
+    def test_route_group_prefix_names_and_url_reversal(self):
+        api = self.app.group("/api", name="api")
+        users = api.group("/users", name="users")
+
+        @users.get("/{user_id}", name="detail")
+        def detail(req):
+            return {"id": req.path_params["user_id"]}
+
+        result = self.app.dispatch(Request("GET", "/api/users/abc", {}))
+        self.assertEqual(result.status, 200)
+        self.assertEqual(json.loads(result.body), {"id": "abc"})
+        self.assertEqual(self.app.url_for("api.users.detail", user_id="a b"),
+                         "/api/users/a%20b")
+        self.assertEqual(self.app.routes[-1]["name"], "api.users.detail")
+        self.assertEqual(self.app.routes[-1]["parameters"], ("user_id",))
+
+    def test_static_route_precedes_dynamic(self):
+        @self.app.get("/items/{item_id}")
+        def dynamic(req): return "dynamic"
+
+        @self.app.get("/items/new")
+        def static(req): return "static"
+
+        self.assertEqual(self.app.dispatch(Request("GET", "/items/new", {})).body, b"static")
+
+    def test_semantically_conflicting_parameter_routes_rejected(self):
+        @self.app.get("/things/{thing_id}")
+        def thing(req): return "ok"
+
+        with self.assertRaises(ValueError):
+            self.app.get("/things/{other_id}")(lambda req: "ambiguous")
+
+    def test_named_route_parameter_validation(self):
+        @self.app.get("/things/{thing_id}", name="thing")
+        def thing(req): return "ok"
+
+        with self.assertRaises(TypeError):
+            self.app.url_for("thing")
+        with self.assertRaises(KeyError):
+            self.app.url_for("missing")
+
 
 class SocketServerTests(unittest.TestCase):
     def setUp(self):
