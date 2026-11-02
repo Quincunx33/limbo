@@ -14,7 +14,7 @@ from limbo.frontend_scanner import scan_imports
 from limbo.css_scanner import scan_css_dependencies
 from limbo.frontend_cache import TransformCache
 from limbo.frontend_engine import (
-    AdapterError, AdapterRegistry, BrowserNativeAdapter, EsbuildAdapter,
+    AdapterError, AdapterRegistry, BrowserNativeAdapter, EsbuildAdapter, FrameworkSFCAdapter,
 )
 
 
@@ -152,7 +152,17 @@ const meta = import.meta.url;
             payload = json.loads(output.getvalue())
             self.assertEqual(payload["schema_version"], 1)
             ids = {item["adapter_id"] for item in payload["adapters"]}
-            self.assertEqual(ids, {"browser-native", "esbuild"})
+            self.assertEqual(ids, {"browser-native", "esbuild", "vue", "svelte"})
+
+    def test_framework_adapters_are_registered_but_optional(self):
+        with tempfile.TemporaryDirectory() as temp:
+            vue = FrameworkSFCAdapter(temp, "vue")
+            svelte = FrameworkSFCAdapter(temp, "svelte")
+            self.assertEqual(vue.capability.extensions, (".vue",))
+            self.assertEqual(svelte.capability.extensions, (".svelte",))
+            with patch.object(vue, "detect", return_value=False):
+                with self.assertRaisesRegex(AdapterError, "Requires Node.js"):
+                    vue.transform(Path(temp) / "Component.vue")
 
     def test_registry_rejects_duplicate_ids(self):
         with self.assertRaisesRegex(ValueError, "duplicate"):
