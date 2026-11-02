@@ -22,7 +22,7 @@ def _create(name: str) -> int:
         (target / folder).mkdir(parents=True, exist_ok=True)
     (target / "frontend" / "src" / "main.js").write_text('''const root = document.querySelector("#app");\nroot.textContent = "Frontend modules are served locally by Limbo.";\n''', encoding="utf-8")
     (target / "app.py").write_text('''from limbo import Limbo\n\napp = Limbo(name="My Limbo app")\napp.enable_frontend("frontend")\n\n@app.get("/")\ndef home(req):\n    tags = app.frontend_script("src/main.js")\n    return app.html("<!doctype html><html><head><meta charset='utf-8'><title>Limbo</title></head>"\n                    "<body><h1>Hello from Limbo</h1><div id='app'>Loading…</div>" + tags + "</body></html>")\n\n@app.get("/api/health")\ndef health(req):\n    return {"ok": True}\n\napp.static("/static", "static")\n\nif __name__ == "__main__":\n    app.run()\n''', encoding="utf-8")
-    (target / "limbo.toml").write_text('[app]\nname = "My Limbo app"\nhost = "127.0.0.1"\nport = 8000\ndebug = true\n', encoding="utf-8")
+    (target / "limbo.toml").write_text('[app]\nname = "My Limbo app"\ndebug = true\n\n[server]\nhost = "127.0.0.1"\nport = 8000\n', encoding="utf-8")
     (target / "requirements.txt").write_text("# Limbo core has no third-party dependencies.\n", encoding="utf-8")
     (target / "README.md").write_text(f"# {target.name}\n\nRun `python app.py` from this directory.\n", encoding="utf-8")
     print(f"Created {target}. Run `cd {target} && python app.py`.")
@@ -64,10 +64,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "create": return _create(args.name)
     if args.command in ("dev", "start"):
         try:
-            config = load_config()
+            config = load_config(overrides={"server": {"host": args.host, "port": args.port}})
             app = _load_app()
-            host = args.host if args.host is not None else config.server.get("host", "127.0.0.1")
-            port = args.port if args.port is not None else config.server.get("port", 8000)
+            host = config.server.get("host", "127.0.0.1")
+            port = config.server.get("port", 8000)
             print(f"Limbo {__version__} serving on http://{host}:{port} (Ctrl+C to stop)")
             app.run(host=host, port=port)
             return 0
