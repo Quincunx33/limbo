@@ -1,7 +1,9 @@
+import socket
 import tempfile
 import unittest
 from pathlib import Path
 from limbo import Limbo, Request, Response
+from limbo.server import LimboServer
 
 class StaticDeliveryTests(unittest.TestCase):
     def setUp(self):
@@ -46,6 +48,16 @@ class StaticDeliveryTests(unittest.TestCase):
         self.assertEqual(head.status, 200)
         self.assertEqual(head.headers["Content-Length"], "10")
         self.assertEqual(head.body, b"")
+        wire_server = LimboServer(lambda request: head)
+        left, right = socket.socketpair()
+        try:
+            wire_server._write_response(left, head, "HEAD", False)
+            wire = right.recv(4096).lower()
+            self.assertIn(b"content-length: 10", wire)
+            self.assertNotIn(b"0123456789", wire)
+        finally:
+            left.close()
+            right.close()
         directory = self.request("/assets/docs/")
         self.assertEqual(directory.status, 200)
         self.assertEqual(b"".join(directory.body), b"index")
@@ -70,6 +82,14 @@ class StaticDeliveryTests(unittest.TestCase):
         self.assertIn("HttpOnly", response.cookies[0])
         self.assertIn("Secure", response.cookies[0])
         self.assertIn("SameSite=Strict", response.cookies[0])
+        left, right = socket.socketpair()
+        try:
+            LimboServer(lambda request: response)._write_response(left, response, "GET", False)
+            wire = right.recv(4096)
+            self.assertEqual(wire.count(b"set-cookie:"), 2)
+        finally:
+            left.close()
+            right.close()
         with self.assertRaises(ValueError): response.set_header("Bad\r\nName", "x")
 
 if __name__ == "__main__": unittest.main()
