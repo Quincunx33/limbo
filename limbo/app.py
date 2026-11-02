@@ -518,7 +518,7 @@ class Limbo:
                              max_header_bytes=max_header_bytes, max_body_bytes=self.max_body_bytes,
                              trusted_hosts=trusted_hosts, websocket_handler=self.dispatch_websocket if self.websocket_routes else None,
                              websocket_origin_check=self.websocket_origin_allowed,
-                             websocket_options=self.websocket_options)
+                             websocket_options=self.websocket_options, upload_limits=self.upload_limits)
         self._server = server
         try:
             for hook in self.startup_hooks:
