@@ -13,7 +13,7 @@ from pathlib import Path
 
 from . import __version__
 from .frontend import FrontendCompiler
-from .frontend_engine import AdapterRegistry, BrowserNativeAdapter, EsbuildAdapter
+from .frontend_engine import AdapterRegistry, BrowserNativeAdapter, EsbuildAdapter, FrameworkSFCAdapter
 from .config import ConfigError, load_config
 from .project import ProjectMetadataError, edit_package_metadata, preview_directory
 
@@ -197,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.command == "frontend" and args.frontend_command == "capabilities":
         try:
-            registry = AdapterRegistry((BrowserNativeAdapter(), EsbuildAdapter(args.directory)))
+            registry = AdapterRegistry((BrowserNativeAdapter(), EsbuildAdapter(args.directory), FrameworkSFCAdapter(args.directory, "vue"), FrameworkSFCAdapter(args.directory, "svelte")) )
             manifest = registry.manifest()
         except (OSError, ValueError) as exc:
             print(f"Error: {exc}", file=sys.stderr); return 2
