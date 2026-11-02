@@ -222,8 +222,8 @@ def gzip_compress(*, minimum_size: int = 500, level: int = 6) -> Callable:
         if isinstance(response.body, bytes):
             if len(response.body) < minimum_size:
                 return response
-            response.body = zlib.compress(response.body, level, zlib.DEFLATED,
-                                          16 + zlib.MAX_WBITS)
+            compressor = zlib.compressobj(level, zlib.DEFLATED, 16 + zlib.MAX_WBITS)
+            response.body = compressor.compress(response.body) + compressor.flush()
         else:
             def compressed_chunks():
                 compressor = zlib.compressobj(level, zlib.DEFLATED, 16 + zlib.MAX_WBITS)
