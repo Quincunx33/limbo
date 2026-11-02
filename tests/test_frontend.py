@@ -138,6 +138,32 @@ class FrontendServingTests(unittest.TestCase):
             missing = frontend.serve(Request("GET", "/__limbo/_importmap.json", {}))
             self.assertEqual(missing.status, 400)
 
+    def test_css_side_effect_import_is_rewritten_and_served_as_module(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "src").mkdir()
+            (root / "src" / "main.js").write_text('import "./site.css"; export const ready = true;', encoding="utf-8")
+            (root / "src" / "site.css").write_text("body { color: red; }", encoding="utf-8")
+            frontend = FrontendDevServer(root)
+            entry = frontend.serve(Request("GET", "/__limbo/src/main.js", {}))
+            self.assertEqual(entry.status, 200)
+            self.assertIn(b"/__limbo/_css/src/site.css", entry.body)
+            css_module = frontend.serve(Request("GET", "/__limbo/_css/src/site.css", {}))
+            self.assertEqual(css_module.status, 200)
+            self.assertIn(b"fetch(", css_module.body)
+            self.assertIn(b"document.head.appendChild", css_module.body)
+            self.assertEqual(frontend.serve(Request("GET", "/__limbo/_css/src/unknown.css", {})).status, 404)
+
+    def test_css_import_with_bindings_has_actionable_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "src").mkdir()
+            (root / "src" / "main.js").write_text('import styles from "./site.css";', encoding="utf-8")
+            (root / "src" / "site.css").write_text("body{}", encoding="utf-8")
+            response = FrontendDevServer(root).serve(Request("GET", "/__limbo/src/main.js", {}))
+            self.assertEqual(response.status, 422)
+            self.assertIn(b"side-effect import", response.body)
+
     def test_optional_esbuild_failure_is_actionable(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "main.ts"
