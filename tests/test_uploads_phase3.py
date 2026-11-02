@@ -58,7 +58,7 @@ class UploadLifecycleTests(unittest.TestCase):
             self.assertEqual(list(Path(directory).iterdir()), [])
 
     def test_safe_filename_and_chunk_size_validation(self):
-        upload = UploadFile("../bad\\\name?.txt", "text/plain", b"ok")
+        upload = UploadFile("../bad\\name?.txt", "text/plain", b"ok")
         with tempfile.TemporaryDirectory() as directory:
             saved = upload.save(directory)
             self.assertEqual(saved.name, "name_.txt")
