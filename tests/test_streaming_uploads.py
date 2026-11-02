@@ -115,6 +115,28 @@ class StreamingMultipartTests(unittest.TestCase):
         self.assertFalse(path.exists())
         self.assertIsNone(request._upload_tempdir)
 
+    def test_dispatch_cleans_request_uploads_when_handler_raises(self):
+        parsed, tempdir = parse_multipart_stream(
+            "multipart/form-data; boundary=BOUND",
+            io.BytesIO(multipart_body(b"failure-cleanup")),
+        )
+        path = parsed["asset"][0].temporary_path
+        app = Limbo()
+
+        @app.post("/upload")
+        def fail(request):
+            self.assertTrue(request.files["asset"][0].temporary_path.exists())
+            raise RuntimeError("expected test failure")
+
+        request = Request("POST", "/upload", {
+            "content-type": "multipart/form-data; boundary=BOUND"
+        })
+        request._multipart_cache = parsed
+        request._upload_tempdir = tempdir
+        response = app.dispatch(request)
+        self.assertEqual(response.status, 500)
+        self.assertFalse(path.exists())
+
     def test_chunked_multipart_body_is_streamed_and_decoded(self):
         body = multipart_body(b"chunked-payload" * 1000)
         chunks = [body[i:i + 97] for i in range(0, len(body), 97)]
