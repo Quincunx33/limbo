@@ -33,6 +33,12 @@ class StaticDeliveryTests(unittest.TestCase):
         self.assertEqual(updated.status, 200)
         updated.close()
 
+    def test_closing_unstarted_file_stream_releases_descriptor(self):
+        response = self.request()
+        self.assertTrue(hasattr(response.body, "close"))
+        response.close()
+        self.assertIsNone(response.body.descriptor)
+
     def test_ranges_and_if_range(self):
         partial = self.request(headers={"range": "bytes=-3"})
         self.assertEqual(partial.status, 206)
