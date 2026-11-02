@@ -132,6 +132,56 @@ class EsbuildAdapter:
         return TransformResult(code=result.stdout, loader="js")
 
 
+class FrameworkSFCAdapter:
+    """Optional Vue/Svelte SFC adapter backed by the project's local compiler."""
+
+    def __init__(self, project_root: str | Path, framework: str) -> None:
+        if framework not in {"vue", "svelte"}:
+            raise ValueError("framework must be 'vue' or 'svelte'")
+        self.root = Path(project_root).expanduser().resolve()
+        self.framework = framework
+        package = "@vue/compiler-sfc" if framework == "vue" else "svelte"
+        self.capability = AdapterCapability(
+            adapter_id=framework,
+            extensions=(".vue",) if framework == "vue" else (".svelte",),
+            available=False,
+            requires=("node", package),
+            status="optional",
+            reason=f"Requires Node.js and the local {package} package; Limbo does not install it.",
+        )
+
+    def detect(self) -> bool:
+        import shutil
+        from .frontend import FrontendCompiler
+        compiler = FrontendCompiler(self.root)
+        package = "@vue/compiler-sfc" if self.framework == "vue" else "svelte"
+        return bool(compiler.node and compiler._node_package_path(package))
+
+    def transform(self, source_path: Path, *, source: str | None = None) -> TransformResult:
+        path = Path(source_path).expanduser().resolve()
+        try:
+            path.relative_to(self.root)
+        except ValueError as exc:
+            raise AdapterError("SFC source is outside the frontend project") from exc
+        if path.suffix.lower() not in self.capability.extensions:
+            raise AdapterError(f"{self.framework} adapter does not handle {path.suffix or 'extensionless'} files")
+        if source is not None:
+            try:
+                path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError) as exc:
+                raise AdapterError(f"cannot read SFC source {path}: {exc}") from exc
+            if path.read_text(encoding="utf-8") != source:
+                raise AdapterError("SFC adapter currently requires source to match the on-disk file")
+        if not self.detect():
+            raise AdapterError(self.capability.reason)
+        from .frontend import FrontendCompiler, FrontendError
+        try:
+            code = FrontendCompiler(self.root).transform(path)
+        except FrontendError as exc:
+            raise AdapterError(str(exc)) from exc
+        return TransformResult(code=code, loader="js")
+
+
 class AdapterRegistry:
     """Deterministic adapter selection and JSON-serializable capability report."""
 
