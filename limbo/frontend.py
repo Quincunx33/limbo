@@ -19,9 +19,11 @@ from urllib.parse import quote, unquote
 from .http import Request, Response
 from .frontend_scanner import scan_imports
 from .frontend_cache import TransformCache
+from .css_scanner import scan_css_dependencies
 
 
-EXTENSIONS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".json")
+EXTENSIONS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".json", ".css", ".svg", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico", ".woff", ".woff2", ".ttf", ".wasm", ".mp3", ".mp4")
+GRAPH_SOURCE_EXTENSIONS = {".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".css"}
 BROWSER_BUILTINS = {"assert", "buffer", "child_process", "crypto", "events", "fs", "http", "https",
                     "module", "net", "os", "path", "process", "stream", "timers", "tls", "url", "util", "zlib"}
 IMPORT_RE = re.compile(
@@ -293,20 +295,29 @@ class DependencyGraph:
                 raise FrontendError(f"Cannot read frontend module {current}: {exc}") from exc
             local_edges: set[Path] = set()
             bare: set[str] = set()
-            try:
-                scan = scan_imports(source)
-            except ValueError as exc:
-                raise FrontendError(f"Cannot scan imports in {current}: {exc}") from exc
-            self.diagnostics[current] = scan.diagnostics
-            for reference in scan.imports:
-                specifier = reference.specifier
+            if current.suffix.lower() == ".css":
+                references = scan_css_dependencies(source)
+                dependencies = [(item.specifier, item.kind) for item in references]
+                self.diagnostics[current] = ()
+            elif current.suffix.lower() in GRAPH_SOURCE_EXTENSIONS:
+                try:
+                    scan = scan_imports(source)
+                except ValueError as exc:
+                    raise FrontendError(f"Cannot scan imports in {current}: {exc}") from exc
+                self.diagnostics[current] = scan.diagnostics
+                dependencies = [(item.specifier, item.kind) for item in scan.imports]
+            else:
+                self.diagnostics[current] = ()
+                dependencies = []
+            for specifier, _kind in dependencies:
                 if specifier.startswith(("http://", "https://", "data:")):
                     continue
                 if not specifier.startswith(("./", "../", "/", "#")):
                     bare.add(specifier)
                 dependency = self.resolver.resolve(specifier, current).path
                 local_edges.add(dependency)
-                pending.append(dependency)
+                if dependency.suffix.lower() in GRAPH_SOURCE_EXTENSIONS:
+                    pending.append(dependency)
             for stale_dependency in self.edges.get(current, set()) - local_edges:
                 self.reverse.get(stale_dependency, set()).discard(current)
             self.edges[current] = local_edges
