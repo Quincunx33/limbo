@@ -21,6 +21,7 @@ from .http import Request, Response
 from .frontend_scanner import scan_imports
 from .frontend_cache import TransformCache
 from .css_scanner import scan_css_dependencies
+from .frontend_engine import AdapterError, EsbuildAdapter
 
 
 EXTENSIONS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".json", ".css", ".svg", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico", ".woff", ".woff2", ".ttf", ".wasm", ".mp3", ".mp4")
@@ -378,18 +379,21 @@ class FrontendCompiler:
                 return self._esbuild_stdin(source, "tsx", source_path, jsx_import_source)
             return source
         loader = {".ts": "ts", ".tsx": "tsx", ".jsx": "jsx", ".json": "json"}.get(suffix)
-        if loader and self.esbuild:
-            args = [self.esbuild, str(source_path), f"--loader:{suffix}={loader}", "--format=esm", "--target=es2020",
-                    "--jsx=automatic", f"--jsx-import-source={jsx_import_source}", "--log-level=error"]
+        if loader in ("ts", "tsx", "jsx"):
+            adapter = EsbuildAdapter(self.root, executable=self.esbuild)
+            try:
+                return adapter.transform(source_path).code
+            except AdapterError as exc:
+                raise FrontendError(str(exc)) from exc
+        if loader == "json" and self.esbuild:
+            args = [self.esbuild, str(source_path), "--loader:.json=json", "--format=esm", "--target=es2020", "--log-level=error"]
             try:
                 result = subprocess.run(args, cwd=self.root, text=True, capture_output=True, timeout=30, check=False)
             except (OSError, subprocess.TimeoutExpired) as exc:
                 raise FrontendError(f"esbuild could not compile {source_path.name}: {exc}") from exc
             if result.returncode:
-                raise FrontendError("esbuild compilation failed:\n" + result.stderr.strip())
+                raise FrontendError("esbuild compilation failed:\\n" + result.stderr.strip())
             return result.stdout
-        if loader in ("ts", "tsx", "jsx"):
-            raise FrontendError(f"Compiling {suffix} requires optional esbuild. Install it locally (for example: npm install --save-dev esbuild); Limbo will not install it automatically.")
         raise FrontendError(f"No frontend transformer is configured for {suffix or 'extensionless'} files")
 
     def _esbuild_stdin(self, source: str, loader: str, source_path: Path, jsx_import_source: str) -> str:
