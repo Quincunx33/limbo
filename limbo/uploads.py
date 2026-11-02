@@ -53,6 +53,7 @@ class UploadFile:
             flags |= os.O_NOFOLLOW
         directory_fd = None
         fd = None
+        created = False
         use_dir_fd = os.open in getattr(os, "supports_dir_fd", set()) and hasattr(os, "O_DIRECTORY")
         try:
             if use_dir_fd:
@@ -60,6 +61,7 @@ class UploadFile:
                 fd = os.open(chosen, flags, 0o600, dir_fd=directory_fd)
             else:
                 fd = os.open(destination, flags, 0o600)
+            created = True
             with os.fdopen(fd, "wb") as output:
                 fd = None
                 for chunk in self.iter_chunks(chunk_size):
@@ -67,13 +69,14 @@ class UploadFile:
         except Exception:
             if fd is not None:
                 os.close(fd)
-            try:
-                if use_dir_fd and directory_fd is not None:
-                    os.unlink(chosen, dir_fd=directory_fd)
-                else:
-                    destination.unlink()
-            except OSError:
-                pass
+            if created:
+                try:
+                    if use_dir_fd and directory_fd is not None:
+                        os.unlink(chosen, dir_fd=directory_fd)
+                    else:
+                        destination.unlink()
+                except OSError:
+                    pass
             raise
         finally:
             if directory_fd is not None:

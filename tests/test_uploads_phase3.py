@@ -23,11 +23,12 @@ class UploadLifecycleTests(unittest.TestCase):
             (b'Content-Disposition: form-data; name="a"', b"one"),
             (b'Content-Disposition: form-data; name="b"', b"two"),
             (b'Content-Disposition: form-data; name="f"; filename="x.txt"', b"1234"),
+            (b'Content-Disposition: form-data; name="g"; filename="y.txt"', b"5678"),
         )
         with self.assertRaisesRegex(ValueError, "field count"):
             parse_multipart("multipart/form-data; boundary=BOUND", body, max_fields=1)
         with self.assertRaisesRegex(ValueError, "file count"):
-            parse_multipart("multipart/form-data; boundary=BOUND", body, max_files=0)
+            parse_multipart("multipart/form-data; boundary=BOUND", body, max_files=1)
         with self.assertRaisesRegex(ValueError, "file size"):
             parse_multipart("multipart/form-data; boundary=BOUND", body, max_file_bytes=3)
 
