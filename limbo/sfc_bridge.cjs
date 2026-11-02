@@ -8,6 +8,7 @@ const sourcePath = path.resolve(process.argv[2]);
 const source = fs.readFileSync(sourcePath, "utf8");
 const projectRequire = createRequire(path.join(process.cwd(), "package.json"));
 const framework = path.extname(sourcePath).toLowerCase();
+let sourceMap = null;
 
 function injectStyles(code, styles, id) {
   if (!styles.length) return code;
@@ -26,11 +27,13 @@ if (framework === ".vue") {
   const scopeId = `data-v-${id}`;
   let code;
   if (descriptor.scriptSetup) {
-    code = compileScript(descriptor, {
+    const compiled = compileScript(descriptor, {
       id,
       inlineTemplate: true,
       templateOptions: { scoped, compilerOptions: scoped ? { scopeId } : {} },
-    }).content;
+    });
+    code = compiled.content;
+    sourceMap = compiled.map || null;
     if (scoped) {
       code = code.replace(/export\s+default\s+/, "const __limbo_sfc__ = ") +
         `\n__limbo_sfc__.__scopeId=${JSON.stringify(scopeId)};\nexport default __limbo_sfc__;`;
@@ -49,6 +52,7 @@ if (framework === ".vue") {
           compilerOptions: scoped ? { scopeId } : {},
         })
       : { code: "export function render(){return null}", errors: [] };
+    sourceMap = template.map || null;
     if (template.errors.length) throw template.errors[0];
     const scopedSetup = scoped ? `__sfc__.__scopeId=${JSON.stringify(scopeId)};` : "";
     code = `${script}\n${template.code}\nif(typeof __sfc__!=="undefined"){__sfc__.render=render;${scopedSetup}}\nexport default typeof __sfc__!=="undefined"?__sfc__:{render};`;
@@ -65,12 +69,19 @@ if (framework === ".vue") {
     if (result.errors.length) throw result.errors[0];
     return result.code;
   });
-  process.stdout.write(injectStyles(code, styles, id));
+  const output = injectStyles(code, styles, id);
+  process.stdout.write(process.argv.includes("--json")
+    ? JSON.stringify({ code: output, sourceMap })
+    : output);
 } else if (framework === ".svelte") {
   const { compile } = projectRequire("svelte/compiler");
   const result = compile(source, { filename: sourcePath, generate: "client", dev: true });
   const styles = result.css?.code ? [result.css.code] : [];
-  process.stdout.write(injectStyles(result.js.code, styles, crypto.createHash("sha1").update(sourcePath).digest("hex").slice(0, 8)));
+  const output = injectStyles(result.js.code, styles, crypto.createHash("sha1").update(sourcePath).digest("hex").slice(0, 8));
+  sourceMap = result.js.map || null;
+  process.stdout.write(process.argv.includes("--json")
+    ? JSON.stringify({ code: output, sourceMap })
+    : output);
 } else {
   throw new Error(`Unsupported single-file component: ${framework}`);
 }

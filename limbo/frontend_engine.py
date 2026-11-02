@@ -195,11 +195,25 @@ class FrameworkSFCAdapter:
         if not self.detect():
             raise AdapterError(self.capability.reason)
         from .frontend import FrontendCompiler, FrontendError
+        compiler = FrontendCompiler(self.root)
         try:
-            code = FrontendCompiler(self.root).transform(path)
+            original = path.read_text(encoding="utf-8")
+            if re.search(r"<script\b[^>]*\blang\s*=\s*(['\"])ts\1", original):
+                code = compiler.transform(path)
+                return TransformResult(code=code, loader="js")
+            code, source_map = compiler._compile_sfc_result(path)
         except FrontendError as exc:
             raise AdapterError(str(exc)) from exc
-        return TransformResult(code=code, loader="js")
+        if source_map is None:
+            return TransformResult(code=code, loader="js")
+        if isinstance(source_map, str):
+            source_map_text = source_map
+        else:
+            source_map_text = json.dumps(source_map, separators=(",", ":"), ensure_ascii=False)
+        encoded = base64.b64encode(source_map_text.encode("utf-8")).decode("ascii")
+        if "sourceMappingURL=" not in code:
+            code += "\n//# sourceMappingURL=data:application/json;base64," + encoded + "\n"
+        return TransformResult(code=code, loader="js", source_map=source_map_text)
 
 
 class AdapterRegistry:

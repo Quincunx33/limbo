@@ -443,6 +443,10 @@ class FrontendCompiler:
         return result.stdout
 
     def _compile_sfc(self, source_path: Path) -> str:
+        code, _source_map = self._compile_sfc_result(source_path)
+        return code
+
+    def _compile_sfc_result(self, source_path: Path) -> tuple[str, dict[str, Any] | str | None]:
         if not self.node:
             raise FrontendError(f"Compiling {source_path.suffix} requires Node.js and its optional framework compiler")
         package = "@vue/compiler-sfc" if source_path.suffix == ".vue" else "svelte"
@@ -451,13 +455,23 @@ class FrontendCompiler:
             raise FrontendError(f"{source_path.suffix} compilation requires optional '{package}'. Install it in the frontend project with `npm install --save-dev {install_name}`.")
         bridge = Path(__file__).with_name("sfc_bridge.cjs")
         try:
-            result = subprocess.run([self.node, str(bridge), str(source_path)], cwd=self.root,
+            result = subprocess.run([self.node, str(bridge), str(source_path), "--json"], cwd=self.root,
                                     text=True, capture_output=True, timeout=30, check=False)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise FrontendError(f"Framework compiler failed: {exc}") from exc
         if result.returncode:
             raise FrontendError(f"{package} compilation failed:\n{result.stderr.strip()}")
-        return result.stdout
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise FrontendError(f"{package} compiler returned invalid JSON output") from exc
+        code = payload.get("code")
+        source_map = payload.get("sourceMap")
+        if not isinstance(code, str):
+            raise FrontendError(f"{package} compiler returned no JavaScript output")
+        if source_map is not None and not isinstance(source_map, (dict, str)):
+            raise FrontendError(f"{package} compiler returned an invalid source map")
+        return code, source_map
 
     def _node_package_path(self, package: str) -> str | None:
         for start in (self.root, *self.root.parents):
@@ -518,7 +532,15 @@ class FrontendDevServer:
             if relative == "_version":
                 return Response.json({"version": self._version_token()}, headers={"Cache-Control": "no-store"})
             if relative == "_client.js":
-                client = ("(()=>{let version=null;const poll=async()=>{try{const r=await fetch(" + json.dumps(self.prefix + "/_version") + ",{cache:'no-store'});if(!r.ok)return;const d=await r.json();if(version===null)version=d.version;else if(version!==d.version)location.reload()}catch(_){}};poll();setInterval(poll,1200)})();")
+                client = ("(()=>{const key='__limbo_hmr_state__';"
+                          "const restore=()=>{try{const raw=sessionStorage.getItem(key);if(!raw)return;"
+                          "const state=JSON.parse(raw);sessionStorage.removeItem(key);"
+                          "window.__LIMBO_HMR_STATE__=state;window.dispatchEvent(new CustomEvent('limbo:hmr-ready',{detail:state}))}catch(_){}};"
+                          "const preserve=()=>{try{if(window.__LIMBO_HMR_STATE__!==undefined)"
+                          "sessionStorage.setItem(key,JSON.stringify(window.__LIMBO_HMR_STATE__))}catch(_){}};"
+                          "restore();let version=null;const poll=async()=>{try{const r=await fetch(" + json.dumps(self.prefix + "/_version") + ",{cache:'no-store'});"
+                          "if(!r.ok)return;const d=await r.json();if(version===null)version=d.version;"
+                          "else if(version!==d.version){preserve();location.reload()}}catch(_){}};poll();setInterval(poll,1200)})();")
                 return Response(client, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
             if relative.startswith("_css/"):
                 css_relative = unquote(relative[len("_css/"):])

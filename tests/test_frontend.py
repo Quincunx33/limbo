@@ -184,6 +184,8 @@ class FrontendServingTests(unittest.TestCase):
             self.assertEqual(first.status, 200)
             self.assertEqual(client.status, 200)
             self.assertIn(b"location.reload()", client.body)
+            self.assertIn(b"sessionStorage", client.body)
+            self.assertIn(b"limbo:hmr-ready", client.body)
             old_version = json.loads(first.body)["version"]
             (root / "main.js").write_text('export const value = 2;', encoding="utf-8")
             new_version = frontend.serve(Request("GET", "/__limbo/_version", {}))

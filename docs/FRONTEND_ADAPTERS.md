@@ -85,24 +85,27 @@ old modules are not retained after edits.
 
 The dev server exposes a version endpoint and a small polling client. When a
 watched module or asset changes, it performs a safe full-page reload. The
-version token hashes watched file contents. This is a reload fallback, not
-Hot Module Replacement: module state is not preserved and the manifest
-correctly continues to report HMR as unavailable.
+version token hashes watched file contents. The client includes an opt-in state
+bridge: applications may keep JSON-serializable data in
+`window.__LIMBO_HMR_STATE__`; it is saved before reload and restored with a
+`limbo:hmr-ready` event. This preserves app state across the safe full reload,
+but is not module-level Hot Module Replacement and does not claim HMR support.
 
 ## WebAssembly and assets
 
 The dev server can serve `.wasm` files and common image, font, audio and video
 assets as binary files. The graph records imported assets as dependency leaves.
 Browser instantiation remains the application's responsibility, for example
-with `WebAssembly.instantiateStreaming(fetch("/path/module.wasm"))`; the
-current phase does not provide a WASM compiler or runtime.
+with `WebAssembly.instantiateStreaming(fetch("/path/module.wasm"))`; a real
+Chromium headless fixture verifies that a served WASM module instantiates and
+executes. Limbo does not provide a WASM compiler or runtime.
 
 ## Remaining boundaries
 
 This is an incremental local development engine, not a production bundler.
 Parser-grade JavaScript scanning (including template interpolation and
 regex-literal edge cases), arbitrary computed imports, full npm condition
-semantics, CSS modules, bare CSS imports, SFC source maps, state-preserving HMR,
-production optimization/code splitting and real browser-level framework
-fixtures remain outside the currently verified capability set. Production
-build belongs to Phase 6.
+semantics, CSS modules, bare CSS imports, TypeScript-in-SFC source-map
+integration, true module-level state-preserving HMR, production optimization/
+code splitting and broad browser-level framework fixtures remain outside the
+currently verified capability set. Production build belongs to Phase 6.

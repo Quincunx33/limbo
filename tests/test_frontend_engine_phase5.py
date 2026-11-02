@@ -178,6 +178,20 @@ const meta = import.meta.url;
                 with self.assertRaisesRegex(AdapterError, "Requires Node.js"):
                     vue.transform(Path(temp) / "Component.vue")
 
+    def test_sfc_adapter_serves_compiler_source_map_inline(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "Component.vue"
+            path.write_text("<template><p>hello</p></template>", encoding="utf-8")
+            source_map = {"version": 3, "sources": ["Component.vue"], "names": [], "mappings": "AAAA"}
+            adapter = FrameworkSFCAdapter(temp, "vue")
+            with patch.object(adapter, "detect", return_value=True), \
+                 patch("limbo.frontend.FrontendCompiler._compile_sfc_result", return_value=("export default {}", source_map)):
+                result = adapter.transform(path)
+            self.assertEqual(result.source_map, json.dumps(source_map, separators=(",", ":")))
+            self.assertIn("sourceMappingURL=data:application/json;base64,", result.code)
+            encoded = result.code.rsplit("sourceMappingURL=data:application/json;base64,", 1)[1].strip()
+            self.assertEqual(json.loads(base64.b64decode(encoded)), source_map)
+
     def test_registry_rejects_duplicate_ids(self):
         with self.assertRaisesRegex(ValueError, "duplicate"):
             AdapterRegistry((BrowserNativeAdapter(), BrowserNativeAdapter()))
