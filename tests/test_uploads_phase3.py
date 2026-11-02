@@ -11,12 +11,12 @@ class UploadLifecycleTests(unittest.TestCase):
     def multipart(self, *parts):
         body = bytearray()
         for headers, payload in parts:
-            body.extend(b"--BOUND\\r\\n")
+            body.extend(b"--BOUND\r\n")
             body.extend(headers)
-            body.extend(b"\\r\\n\\r\\n")
+            body.extend(b"\r\n\r\n")
             body.extend(payload)
-            body.extend(b"\\r\\n")
-        body.extend(b"--BOUND--\\r\\n")
+            body.extend(b"\r\n")
+        body.extend(b"--BOUND--\r\n")
         return bytes(body)
 
     def test_file_and_field_limits_are_enforced(self):
@@ -47,18 +47,18 @@ class UploadLifecycleTests(unittest.TestCase):
     def test_failed_save_removes_partially_written_destination(self):
         upload = UploadFile("interrupted.bin", "application/octet-stream", b"abcdefgh")
 
-        def fail_after_first_chunk(chunk_size):
+        def fail_after_first_chunk(self, chunk_size):
             yield b"abc"
             raise OSError("simulated disk write failure")
 
         with tempfile.TemporaryDirectory() as directory:
-            with patch.object(upload, "iter_chunks", side_effect=fail_after_first_chunk):
+            with patch.object(UploadFile, "iter_chunks", fail_after_first_chunk):
                 with self.assertRaisesRegex(OSError, "simulated disk write failure"):
                     upload.save(directory, chunk_size=3)
             self.assertEqual(list(Path(directory).iterdir()), [])
 
     def test_safe_filename_and_chunk_size_validation(self):
-        upload = UploadFile("../bad\\\\name?.txt", "text/plain", b"ok")
+        upload = UploadFile("../bad\\\name?.txt", "text/plain", b"ok")
         with tempfile.TemporaryDirectory() as directory:
             saved = upload.save(directory)
             self.assertEqual(saved.name, "name_.txt")
@@ -70,8 +70,8 @@ class UploadLifecycleTests(unittest.TestCase):
 
 class ConfiguredUploadLimitTests(unittest.TestCase):
     def test_application_upload_file_and_body_limits_map_to_413(self):
-        body = (b'--BOUND\\r\\nContent-Disposition: form-data; name="file"; filename="x.bin"\\r\\n'
-                b'Content-Type: application/octet-stream\\r\\n\\r\\n1234\\r\\n--BOUND--\\r\\n')
+        body = (b'--BOUND\r\nContent-Disposition: form-data; name="file"; filename="x.bin"\r\n'
+                b'Content-Type: application/octet-stream\r\n\r\n1234\r\n--BOUND--\r\n')
         app = Limbo(max_body_bytes=1024, max_upload_file_bytes=3)
         @app.post("/upload")
         def upload(request):
@@ -88,9 +88,9 @@ class ConfiguredUploadLimitTests(unittest.TestCase):
         self.assertEqual(small.dispatch(Request("POST", "/upload", {}, b"123")).status, 413)
 
     def test_application_enforces_file_count_and_malformed_multipart_status(self):
-        body = (b'--BOUND\\r\\nContent-Disposition: form-data; name="a"; filename="a.txt"\\r\\n\\r\\na\\r\\n'
-                b'--BOUND\\r\\nContent-Disposition: form-data; name="b"; filename="b.txt"\\r\\n\\r\\nb\\r\\n'
-                b'--BOUND--\\r\\n')
+        body = (b'--BOUND\r\nContent-Disposition: form-data; name="a"; filename="a.txt"\r\n\r\na\r\n'
+                b'--BOUND\r\nContent-Disposition: form-data; name="b"; filename="b.txt"\r\n\r\nb\r\n'
+                b'--BOUND--\r\n')
         app = Limbo(max_upload_files=1)
         @app.post("/upload")
         def upload(request):
