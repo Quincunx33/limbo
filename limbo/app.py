@@ -488,7 +488,8 @@ class Limbo:
             self.background_tasks = BackgroundTasks()
         server = LimboServer(self.dispatch, host, port, request_timeout=request_timeout,
                              max_header_bytes=max_header_bytes, max_body_bytes=self.max_body_bytes,
-                             trusted_hosts=trusted_hosts, websocket_handler=self.dispatch_websocket if self.websocket_routes else None,\n                             websocket_origin_check=self.websocket_origin_allowed)
+                             trusted_hosts=trusted_hosts, websocket_handler=self.dispatch_websocket if self.websocket_routes else None,
+                             websocket_origin_check=self.websocket_origin_allowed)
         self._server = server
         try:
             for hook in self.startup_hooks:
