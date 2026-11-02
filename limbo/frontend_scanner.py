@@ -162,7 +162,7 @@ def scan_imports(source: str) -> ScanResult:
                         found.append(ref)
                         seen.add(key)
                 break
-            if cursor > next_index and current.line > tokens[cursor - 1].line and current.value not in {"from", "as"}:
+            if cursor > next_index and current.line > tokens[cursor - 1].line and current.value not in {"from", "as", "}"}:
                 previous = tokens[cursor - 1]
                 if previous.value not in {",", "{", "}", "*"}:
                     break
