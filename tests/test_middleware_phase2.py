@@ -1,6 +1,7 @@
+import gzip
 import unittest
 
-from limbo import Limbo, Request, Response, access_log, cors, rate_limit, request_id, security_headers
+from limbo import Limbo, Request, Response, access_log, cors, gzip_compress, rate_limit, request_id, security_headers
 
 
 class RequestNegotiationTests(unittest.TestCase):
@@ -85,6 +86,25 @@ class MiddlewareTests(unittest.TestCase):
         self.assertNotEqual(invalid.headers["X-Request-ID"], "bad\r\nvalue")
         self.assertLessEqual(len(invalid.headers["X-Request-ID"]), 128)
         self.assertEqual(len(records), 2)
+
+    def test_gzip_compresses_bytes_and_streams_only_when_accepted(self):
+        middleware = gzip_compress(minimum_size=32)
+        payload = "Limbo response compression " * 30
+        request = Request("GET", "/", {"accept-encoding": "gzip"})
+        compressed = middleware(request, lambda req: Response.text(payload))
+        self.assertEqual(compressed.headers["Content-Encoding"], "gzip")
+        self.assertEqual(gzip.decompress(compressed.body).decode(), payload)
+        self.assertNotIn("Content-Length", compressed.headers)
+        self.assertIn("Accept-Encoding", compressed.headers["Vary"])
+
+        streamed = middleware(request, lambda req: Response(
+            iter([b"streamed ", b"payload " * 20]), 200, {"Content-Type": "text/plain"}))
+        self.assertEqual(gzip.decompress(b"".join(streamed.body)), b"streamed " + b"payload " * 20)
+
+        identity = middleware(Request("GET", "/", {"accept-encoding": "gzip;q=0"}),
+                              lambda req: Response.text(payload))
+        self.assertNotIn("Content-Encoding", identity.headers)
+        self.assertEqual(identity.body, payload.encode())
 
     def test_rate_limit_is_bounded_and_returns_retry_after(self):
         limiter = rate_limit(capacity=1, refill_rate=0.01, max_keys=2)
