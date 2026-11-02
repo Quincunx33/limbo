@@ -245,5 +245,52 @@ class SocketServerTests(unittest.TestCase):
             thread.join(timeout=2)
 
 
+    def test_options_asterisk_and_head_fallback(self):
+        app = Limbo()
+        @app.get("/resource")
+        def resource(req):
+            return Response(b"payload")
+        head = app.dispatch(Request("HEAD", "/resource", {}))
+        self.assertEqual(head.status, 200)
+        options = app.dispatch(Request("OPTIONS", "*", {}))
+        self.assertEqual(options.status, 204)
+        self.assertIn("GET", options.headers["Allow"])
+        self.assertIn("OPTIONS", options.headers["Allow"])
+
+    def test_http_10_response_version_and_streaming(self):
+        server = LimboServer(lambda request: Response(iter([b"stream"])), "127.0.0.1", 0)
+        left, right = socket.socketpair()
+        try:
+            server._write_response(left, Response(iter([b"stream"])), "GET", False,
+                                   protocol_version="HTTP/1.0")
+            left.shutdown(socket.SHUT_WR)
+            data = b""
+            while True:
+                part = right.recv(4096)
+                if not part:
+                    break
+                data += part
+            self.assertTrue(data.startswith(b"HTTP/1.0 200 OK\\r\\n"))
+            self.assertNotIn(b"transfer-encoding", data.lower())
+            self.assertTrue(data.endswith(b"stream"))
+        finally:
+            left.close()
+            right.close()
+
+    def test_proxy_forwarding_headers_are_preserved(self):
+        import io
+        server = LimboServer(lambda request: Response.text("ok"), "127.0.0.1", 0)
+        request = server._read_request(
+            io.BytesIO(
+                b"GET / HTTP/1.1\\r\\nHost: origin.example\\r\\n"
+                b"X-Forwarded-For: 203.0.113.8\\r\\nX-Forwarded-Proto: https\\r\\n"
+                b"Via: 1.1 edge-proxy\\r\\n\\r\\n"
+            ),
+            ("127.0.0.1", 1234),
+        )
+        self.assertEqual(request.headers["x-forwarded-for"], "203.0.113.8")
+        self.assertEqual(request.headers["x-forwarded-proto"], "https")
+        self.assertEqual(request.headers["via"], "1.1 edge-proxy")
+
 if __name__ == "__main__":
     unittest.main()

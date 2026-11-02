@@ -168,6 +168,10 @@ class Limbo:
     def dispatch(self, request: Request) -> Response:
         try:
             def endpoint(req: Request) -> Response:
+                if req.method == "OPTIONS" and req.path == "*":
+                    methods = {route.method for route in self.router.routes}
+                    methods.add("OPTIONS")
+                    return Response(b"", 204, {"Allow": ", ".join(sorted(methods))})
                 route, params, allowed = self.router.match(req.method, req.path)
                 if route:
                     req.path_params = params

@@ -129,8 +129,10 @@ class LimboServer:
                     response = Response.text(exc.message, exc.status)
                 except Exception:
                     response = Response.text("Internal Server Error", 500)
+                if request.version == "HTTP/1.0" and not isinstance(response.body, bytes) and "content-length" not in {k.lower() for k in response.headers} and response.status not in (204, 205, 304):
+                    keep_alive = False
                 try:
-                    self._write_response(conn, response, request.method, keep_alive)
+                    self._write_response(conn, response, request.method, keep_alive, protocol_version=request.version)
                 except (OSError, TypeError, ValueError):
                     break
                 if not keep_alive:
@@ -362,7 +364,7 @@ class LimboServer:
             chunks.append(data[:-2])
             size_total += size
 
-    def _write_response(self, conn: socket.socket, response: Response, method: str, keep_alive: bool) -> None:
+    def _write_response(self, conn: socket.socket, response: Response, method: str, keep_alive: bool, *, protocol_version: str = "HTTP/1.1") -> None:
         status = response.status if isinstance(response.status, int) and 100 <= response.status <= 599 else 500
         phrase = HTTPStatus(status).phrase
         headers: dict[str, str] = {}
@@ -385,7 +387,7 @@ class LimboServer:
         no_body = method == "HEAD" or status in (204, 205, 304) or 100 <= status < 200
         if "content-length" in headers and "transfer-encoding" in headers:
             raise ValueError("Conflicting response framing headers")
-        if "transfer-encoding" in headers and (headers["transfer-encoding"].strip().lower() != "chunked" or not stream_body or no_body):
+        if "transfer-encoding" in headers and (headers["transfer-encoding"].strip().lower() != "chunked" or not stream_body or no_body or protocol_version == "HTTP/1.0"):
             raise ValueError("Unsupported response Transfer-Encoding")
         expected = None
         if "content-length" in headers:
@@ -403,9 +405,9 @@ class LimboServer:
                 raise ValueError("Response Content-Length does not match body")
             headers["content-length"] = str(actual); expected = actual
         chunked = stream_body and not no_body and headers.get("transfer-encoding", "").lower() == "chunked"
-        if stream_body and not no_body and expected is None and not chunked:
+        if stream_body and not no_body and expected is None and not chunked and protocol_version == "HTTP/1.1":
             headers["transfer-encoding"] = "chunked"; chunked = True
-        head = f"HTTP/1.1 {status} {phrase}\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers.items()) + "\r\n"
+        head = f"{protocol_version} {status} {phrase}\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers.items()) + "\r\n"
         conn.sendall(head.encode("latin-1", "strict"))
         if no_body: return
         if not stream_body:

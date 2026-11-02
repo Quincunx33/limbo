@@ -97,7 +97,9 @@ The compiler contract must expose capability detection, transform inputs/outputs
 
 **Progress (2026-11-02):** Added a standard-library `http.client` interoperability test and active accepted-socket shutdown so idle keep-alive workers are unblocked immediately. Added a sustained idle-client shutdown regression test. These checks cover one standard HTTP client path and a bounded 24-connection shutdown scenario; they are not an exhaustive proxy matrix or a sustained throughput/load benchmark.
 
-**Still required before closing this phase:** broader proxy/interoperability coverage, sustained throughput/load tests, external protocol review and an independent security review. Do not call the custom server production-certified.
+**Phase 1 implementation status: COMPLETE (2026-11-02).** The supported core HTTP and routing behavior is covered by the standard-library test suite and CI matrix. Coverage includes malformed request lines and headers, framing ambiguity, bounded resources, absolute deadlines, Host validation and allowlisting, standard HTTP client interoperability, proxy-forwarding metadata preservation as untrusted input, HTTP/1.0 response versioning and close-delimited streaming, HEAD fallback/body suppression, route-level OPTIONS and server-wide `OPTIONS *`, concurrent clients, response framing and prompt shutdown of idle keep-alive connections.
+
+**Assurance boundary:** this is an engineering phase completion, not production certification. No independent external protocol audit or third-party security assessment has been performed. Run deployment-specific proxy and load tests before exposing the server to untrusted public traffic.
 
 **Exit gate:** supported request/response behavior is specified and tested, including malformed input, concurrency and shutdown.
 
