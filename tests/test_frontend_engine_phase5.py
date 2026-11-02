@@ -3,6 +3,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from limbo.cli import main as cli_main
+from contextlib import redirect_stdout
+from io import StringIO
+
 from limbo.frontend_engine import (
     AdapterError, AdapterRegistry, BrowserNativeAdapter, EsbuildAdapter,
     TransformResult,
@@ -44,6 +48,16 @@ class FrontendAdapterContractTests(unittest.TestCase):
         self.assertEqual(manifest["adapters"][0]["adapter_id"], "browser-native")
         self.assertTrue(manifest["adapters"][0]["available"])
         self.assertEqual(json.loads(registry.manifest_json()), manifest)
+
+    def test_cli_prints_json_capability_manifest(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(cli_main(["frontend", "capabilities", temp, "--json"]), 0)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["schema_version"], 1)
+            ids = {item["adapter_id"] for item in payload["adapters"]}
+            self.assertEqual(ids, {"browser-native", "esbuild"})
 
     def test_registry_rejects_duplicate_ids(self):
         with self.assertRaisesRegex(ValueError, "duplicate"):
