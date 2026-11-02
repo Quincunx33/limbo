@@ -57,3 +57,10 @@ jobs:
         run: |
           python -m unittest discover -s tests -p "test_*phase3.py" -v
           python -m unittest discover -s tests -p "test_streaming_uploads.py" -v
+      - name: Run Phase 4 configuration and CLI tests
+        shell: bash
+        run: |
+          python -m unittest discover -s tests -p "test_config_phase4.py" -v
+          python -m unittest discover -s tests -p "test_project_cli_phase4.py" -v
+          python -m unittest discover -s tests -p "test_starter_templates_phase4.py" -v
+          python -m unittest discover -s tests -p "test_cli_phase4.py" -v
