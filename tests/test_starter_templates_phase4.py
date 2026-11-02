@@ -24,6 +24,13 @@ class StarterTemplateTests(unittest.TestCase):
                     self.assertTrue((target / "frontend" / "src" / "App.vue").is_file())
                     self.assertTrue((target / "package.json").is_file())
 
+    def test_existing_file_path_is_rejected_cleanly(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "not-a-directory"
+            target.write_text("keep", encoding="utf-8")
+            self.assertEqual(_create(str(target), "static"), 2)
+            self.assertEqual(target.read_text(encoding="utf-8"), "keep")
+
     def test_unknown_template_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             self.assertEqual(_create(str(Path(directory) / "starter"), "unsupported"), 2)
