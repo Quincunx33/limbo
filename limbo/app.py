@@ -185,7 +185,9 @@ class Limbo:
                     if req.path == frontend.prefix or req.path.startswith(frontend.prefix + "/"):
                         return frontend.serve(req)
                 if allowed:
-                    return self._error_response(HTTPError(405, "Method Not Allowed"), 405)
+                    response = self._error_response(HTTPError(405, "Method Not Allowed"), 405)
+                    response.headers.setdefault("Allow", ", ".join(sorted(allowed | {"OPTIONS"})))
+                    return response
                 return self._error_response(HTTPError(404, "Not Found"), 404)
 
             next_handler = endpoint

@@ -313,7 +313,7 @@ class HTTPCompletionTests(unittest.TestCase):
         def client_request():
             try:
                 with socket.create_connection(("127.0.0.1", server.port), timeout=2) as client:
-                    client.sendall(b"GET / HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n")
+                    client.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
                     response = b""
                     while True:
                         part = client.recv(4096)
