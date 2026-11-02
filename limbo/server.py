@@ -103,6 +103,7 @@ class LimboServer:
         self.websocket_handler = websocket_handler
         self.websocket_origin_check = websocket_origin_check
         self.websocket_options = websocket_options
+        self.upload_limits = dict(upload_limits or {"max_body_bytes": max_body_bytes, "max_files": 20, "max_fields": 100, "max_file_bytes": max_body_bytes})
         self._socket: socket.socket | None = None
         self._stopping = threading.Event()
         self._threads: set[threading.Thread] = set()
