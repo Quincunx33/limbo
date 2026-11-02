@@ -17,7 +17,17 @@ from .tasks import BackgroundTasks
 
 
 class Limbo:
-    def __init__(self, *, name: str = "Limbo", max_body_bytes: int = 8 * 1024 * 1024) -> None:
+    def __init__(self, *, name: str = "Limbo", max_body_bytes: int = 8 * 1024 * 1024,
+                 max_upload_file_bytes: int = 8 * 1024 * 1024,
+                 max_upload_files: int = 20, max_form_fields: int = 100) -> None:
+        if not isinstance(max_body_bytes, int) or max_body_bytes < 0:
+            raise ValueError("max_body_bytes must be a non-negative integer")
+        if not isinstance(max_upload_file_bytes, int) or max_upload_file_bytes < 1:
+            raise ValueError("max_upload_file_bytes must be positive")
+        if not isinstance(max_upload_files, int) or max_upload_files < 1:
+            raise ValueError("max_upload_files must be positive")
+        if not isinstance(max_form_fields, int) or max_form_fields < 1:
+            raise ValueError("max_form_fields must be positive")
         self.name = name
         self.router = Router()
         self.middlewares: list[Callable] = []
@@ -26,6 +36,8 @@ class Limbo:
         self.templates = TemplateEngine()
         self.frontend_servers: list[FrontendDevServer] = []
         self.max_body_bytes = max_body_bytes
+        self.upload_limits = {"max_body_bytes": max_body_bytes, "max_file_bytes": max_upload_file_bytes,
+                              "max_files": max_upload_files, "max_fields": max_form_fields}
         self.exception_handlers: dict[object, Callable] = {}
         self.background_tasks = BackgroundTasks()
         self.startup_hooks: list[Callable] = []
@@ -229,6 +241,9 @@ class Limbo:
         return Response(chunks(), 200, headers)
 
     def dispatch(self, request: Request) -> Response:
+        if len(request.body) > self.max_body_bytes:
+            return Response.text("Request body too large", 413)
+        request._multipart_limits = self.upload_limits
         try:
             def endpoint(req: Request) -> Response:
                 if req.method == "OPTIONS" and req.path == "*":

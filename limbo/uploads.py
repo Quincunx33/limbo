@@ -11,6 +11,10 @@ from email.message import Message
 from typing import Iterator
 
 
+class UploadLimitError(ValueError):
+    """A multipart body, part count or uploaded file exceeded configured limits."""
+
+
 @dataclass(frozen=True)
 class UploadFile:
     filename: str
@@ -102,7 +106,7 @@ def parse_multipart(content_type: str, body: bytes, *, max_body_bytes: int = 8 *
     if max_body_bytes < 1 or max_files < 1 or max_fields < 1 or max_file_bytes < 1:
         raise ValueError("Multipart limits must be positive")
     if not isinstance(body, bytes) or len(body) > max_body_bytes:
-        raise ValueError("Multipart body exceeds the configured limit")
+        raise UploadLimitError("Multipart body exceeds the configured limit")
     envelope = Message()
     envelope["Content-Type"] = content_type
     if envelope.get_content_type().lower() != "multipart/form-data":
@@ -123,7 +127,7 @@ def parse_multipart(content_type: str, body: bytes, *, max_body_bytes: int = 8 *
     for part in message.iter_parts():
         part_count += 1
         if part_count > max_files + max_fields:
-            raise ValueError("Multipart part count exceeds the configured limit")
+            raise UploadLimitError("Multipart part count exceeds the configured limit")
         if part.get_content_disposition() != "form-data":
             continue
         field_name = part.get_param("name", header="content-disposition")
@@ -134,16 +138,16 @@ def parse_multipart(content_type: str, body: bytes, *, max_body_bytes: int = 8 *
         if filename is not None:
             file_count += 1
             if file_count > max_files:
-                raise ValueError("Multipart file count exceeds the configured limit")
+                raise UploadLimitError("Multipart file count exceeds the configured limit")
             if len(raw) > max_file_bytes:
-                raise ValueError("Uploaded file size exceeds the configured limit")
+                raise UploadLimitError("Uploaded file size exceeds the configured limit")
             value: str | UploadFile = UploadFile(
                 _safe_name(filename), part.get_content_type() or "application/octet-stream", raw
             )
         else:
             field_count += 1
             if field_count > max_fields:
-                raise ValueError("Multipart field count exceeds the configured limit")
+                raise UploadLimitError("Multipart field count exceeds the configured limit")
             charset = part.get_content_charset() or "utf-8"
             try:
                 value = raw.decode(charset)
