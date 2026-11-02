@@ -13,6 +13,7 @@ from .frontend import FrontendDevServer
 from .router import RouteGroup, Router, compile_path
 from .server import LimboServer
 from .templates import TemplateEngine
+from .tasks import BackgroundTasks
 
 
 class Limbo:
@@ -26,6 +27,33 @@ class Limbo:
         self.frontend_servers: list[FrontendDevServer] = []
         self.max_body_bytes = max_body_bytes
         self.exception_handlers: dict[object, Callable] = {}
+        self.background_tasks = BackgroundTasks()
+        self.startup_hooks: list[Callable] = []
+        self.shutdown_hooks: list[Callable] = []
+        self._server: LimboServer | None = None
+
+    def on_startup(self, function: Callable | None = None):
+        """Register a synchronous hook called immediately before serving."""
+        def register(fn):
+            if not callable(fn):
+                raise TypeError("Startup hook must be callable")
+            self.startup_hooks.append(fn)
+            return fn
+        return register(function) if function else register
+
+    def on_shutdown(self, function: Callable | None = None):
+        """Register a synchronous hook called in reverse order during shutdown."""
+        def register(fn):
+            if not callable(fn):
+                raise TypeError("Shutdown hook must be callable")
+            self.shutdown_hooks.append(fn)
+            return fn
+        return register(function) if function else register
+
+    def shutdown(self) -> None:
+        """Request server shutdown; run() performs orderly hook/task cleanup."""
+        if self._server is not None:
+            self._server.shutdown()
 
     @property
     def routes(self) -> list[dict[str, object]]:
@@ -432,10 +460,23 @@ class Limbo:
 
     def run(self, host: str = "127.0.0.1", port: int = 8000, *, request_timeout: float = 15.0,
             max_header_bytes: int = 32768, trusted_hosts: tuple[str, ...] | list[str] | None = None) -> None:
+        if self.background_tasks.closed:
+            self.background_tasks = BackgroundTasks()
         server = LimboServer(self.dispatch, host, port, request_timeout=request_timeout,
                              max_header_bytes=max_header_bytes, max_body_bytes=self.max_body_bytes,
                              trusted_hosts=trusted_hosts, websocket_handler=self.dispatch_websocket if self.websocket_routes else None)
+        self._server = server
         try:
+            for hook in self.startup_hooks:
+                hook()
             server.serve_forever()
         except KeyboardInterrupt:
             server.shutdown()
+        finally:
+            server.shutdown()
+            try:
+                for hook in reversed(self.shutdown_hooks):
+                    hook()
+            finally:
+                self.background_tasks.shutdown(wait=True, cancel_pending=True)
+                self._server = None

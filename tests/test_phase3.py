@@ -136,3 +136,33 @@ class RequestConvenienceTests(unittest.TestCase):
         request = Request("POST", "/", {"content-type": "application/json"}, b'{"ok":true}')
         self.assertEqual(request.json_as(), {"ok": True})
         self.assertIsNone(request.file("missing"))
+
+
+class ApplicationLifecycleTests(unittest.TestCase):
+    def test_startup_shutdown_hooks_and_task_cleanup(self):
+        events = []
+        app = Limbo()
+        @app.on_startup
+        def first():
+            events.append("startup")
+
+        @app.on_shutdown
+        def shutdown_first():
+            events.append("shutdown-first")
+
+        @app.on_shutdown
+        def shutdown_second():
+            events.append("shutdown-second")
+
+        with unittest.mock.patch("limbo.app.LimboServer") as server_class:
+            server_class.return_value.serve_forever.return_value = None
+            app.run()
+        self.assertEqual(events, ["startup", "shutdown-second", "shutdown-first"])
+        self.assertTrue(app.background_tasks.closed)
+
+    def test_shutdown_requests_server_stop(self):
+        app = Limbo()
+        fake = unittest.mock.Mock()
+        app._server = fake
+        app.shutdown()
+        fake.shutdown.assert_called_once_with()
