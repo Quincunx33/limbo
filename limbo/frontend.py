@@ -314,6 +314,10 @@ class DependencyGraph:
             for specifier, _kind in dependencies:
                 if specifier.startswith(("http://", "https://", "data:")):
                     continue
+                if current.suffix.lower() == ".css" and not specifier.startswith(("./", "../", "/")):
+                    raise FrontendError(
+                        f"Bare CSS dependency '{specifier}' in {current.name} is not supported yet; use a relative URL"
+                    )
                 if not specifier.startswith(("./", "../", "/", "#")):
                     bare.add(specifier)
                 dependency = self.resolver.resolve(specifier, current).path
