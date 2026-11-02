@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from limbo import Limbo, Request
 from limbo.server import LimboServer
 from limbo.uploads import UploadFile, parse_multipart_stream
 
@@ -89,6 +90,30 @@ class StreamingMultipartTests(unittest.TestCase):
         finally:
             client.close()
             server_socket.close()
+
+    def test_dispatch_cleans_request_uploads_after_handler_returns(self):
+        parsed, tempdir = parse_multipart_stream(
+            "multipart/form-data; boundary=BOUND",
+            io.BytesIO(multipart_body(b"lifecycle-check")),
+        )
+        upload = parsed["asset"][0]
+        path = upload.temporary_path
+        app = Limbo()
+
+        @app.post("/upload")
+        def receive(request):
+            self.assertEqual(b"".join(request.files["asset"][0].iter_chunks()), b"lifecycle-check")
+            return {"ok": True}
+
+        request = Request("POST", "/upload", {
+            "content-type": "multipart/form-data; boundary=BOUND"
+        })
+        request._multipart_cache = parsed
+        request._upload_tempdir = tempdir
+        response = app.dispatch(request)
+        self.assertEqual(response.status, 200)
+        self.assertFalse(path.exists())
+        self.assertIsNone(request._upload_tempdir)
 
     def test_chunked_multipart_body_is_streamed_and_decoded(self):
         body = multipart_body(b"chunked-payload" * 1000)
