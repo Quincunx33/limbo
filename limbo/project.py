@@ -14,7 +14,7 @@ def edit_package_metadata(root: str | Path, action: str, package: str, *, dev: b
     """Edit package.json declarations without invoking a package manager."""
     if action not in {"add", "remove"}:
         raise ProjectMetadataError("action must be add or remove")
-    if not re.fullmatch(r"(?:@[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]+", package):
+    if package in {".", ".."} or not re.fullmatch(r"(?:@[a-z0-9._-]+/)?[a-z0-9._-]+", package):
         raise ProjectMetadataError(f"invalid package name: {package!r}")
     path = Path(root) / "package.json"
     if not path.is_file():
