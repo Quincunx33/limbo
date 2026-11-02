@@ -345,7 +345,24 @@ class DependencyGraph:
             self.bare_imports[current] = bare
             for dependency in local_edges:
                 self.reverse.setdefault(dependency, set()).add(current)
+        stale_modules = set(self.edges) - visited
+        for stale_module in stale_modules:
+            for dependency in self.edges.pop(stale_module, set()):
+                self.reverse.get(dependency, set()).discard(stale_module)
+            self.reverse.pop(stale_module, None)
+            self.bare_imports.pop(stale_module, None)
+            self.diagnostics.pop(stale_module, None)
         return {path: set(deps) for path, deps in self.edges.items() if path in visited}
+
+    def refresh(self, entry: str | os.PathLike[str], changed: str | os.PathLike[str], *, transform=None) -> tuple[set[Path], dict[Path, set[Path]]]:
+        """Invalidate a changed module and rebuild the reachable graph.
+
+        This keeps reverse edges accurate when an edit removes an import or
+        changes a module's extension, while returning both the affected set and
+        the refreshed graph for dev-server consumers.
+        """
+        affected = self.invalidate(changed)
+        return affected, self.build(entry, transform=transform)
 
     def invalidate(self, changed: str | os.PathLike[str]) -> set[Path]:
         path = Path(changed).resolve()

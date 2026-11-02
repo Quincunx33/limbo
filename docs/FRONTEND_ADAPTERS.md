@@ -79,6 +79,9 @@ ignored by Git and inaccessible through the public frontend route. Cache keys
 include source bytes, relative path, extension, compiler executable identity
 fingerprint, local SFC package manifest fingerprints and transform options.
 Writes use an atomic replace. Editing a file produces a new content key.
+The dependency graph supports incremental invalidation and a `refresh()` rebuild
+operation; removed imports are pruned from both forward and reverse edges so
+old modules are not retained after edits.
 
 The dev server exposes a version endpoint and a small polling client. When a
 watched module or asset changes, it performs a safe full-page reload. The

@@ -64,6 +64,20 @@ class FrontendResolverTests(unittest.TestCase):
         (self.root / "src" / "main.ts").write_text("export {};", encoding="utf-8")
         graph.build("src/main.ts")
         self.assertNotIn(main, graph.reverse.get(util, set()))
+        self.assertNotIn(util, graph.edges)
+
+    def test_refresh_rebuilds_graph_and_prunes_unreachable_modules(self):
+        resolver = ModuleResolver(self.root)
+        graph = DependencyGraph(resolver)
+        graph.build("src/main.ts")
+        main = (self.root / "src" / "main.ts").resolve()
+        util = (self.root / "src" / "util.ts").resolve()
+        (self.root / "src" / "main.ts").write_text("export const clean = true;", encoding="utf-8")
+        affected, refreshed = graph.refresh("src/main.ts", main)
+        self.assertIn(main, affected)
+        self.assertIn(main, refreshed)
+        self.assertNotIn(util, graph.edges)
+        self.assertNotIn(main, graph.reverse.get(util, set()))
 
     def test_package_resolution_searches_nested_node_modules(self):
         importer = self.root / "node_modules" / "outer" / "src" / "index.js"
