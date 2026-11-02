@@ -11,12 +11,54 @@ from io import StringIO
 
 from limbo.frontend import DependencyGraph, ModuleResolver
 from limbo.frontend_scanner import scan_imports
+from limbo.css_scanner import scan_css_dependencies
+from limbo.frontend_cache import TransformCache
 from limbo.frontend_engine import (
     AdapterError, AdapterRegistry, BrowserNativeAdapter, EsbuildAdapter,
 )
 
 
 class FrontendAdapterContractTests(unittest.TestCase):
+    def test_transform_cache_persists_and_keys_compiler_options(self):
+        with tempfile.TemporaryDirectory() as temp:
+            cache = TransformCache(temp)
+            source = b"const value = 1;"
+            key = cache.key(source, compiler="esbuild-1", options={"target": "es2020"})
+            self.assertIsNone(cache.get(key))
+            cache.put(key, "const value=1;")
+            self.assertEqual(cache.get(key), "const value=1;")
+            self.assertEqual((cache.hits, cache.misses), (1, 1))
+            self.assertNotEqual(key, cache.key(source, compiler="esbuild-1", options={"target": "es2022"}))
+            self.assertEqual(cache.clear(), 1)
+
+    def test_css_scanner_finds_imports_and_url_assets_but_ignores_comments(self):
+        source = '''
+/* @import "fake.css"; url(fake.png) */
+@import "theme.css";
+.hero { background: url("../img/hero.webp"); }
+.icon { background: url(data:image/svg+xml,abc); }
+'''
+        refs = scan_css_dependencies(source)
+        self.assertEqual([(r.specifier, r.kind) for r in refs],
+                         [("theme.css", "import"), ("../img/hero.webp", "asset")])
+
+    def test_dependency_graph_tracks_css_and_binary_asset_edges(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "src" / "img").mkdir(parents=True)
+            (root / "src" / "main.js").write_text('import "./site.css";', encoding="utf-8")
+            (root / "src" / "site.css").write_text('@import "./theme.css"; .x{background:url("./img/pixel.png")}', encoding="utf-8")
+            (root / "src" / "theme.css").write_text("body{margin:0}", encoding="utf-8")
+            (root / "src" / "img" / "pixel.png").write_bytes(b"not-really-png")
+            graph = DependencyGraph(ModuleResolver(root))
+            edges = graph.build("src/main.js")
+            css = (root / "src" / "site.css").resolve()
+            main = (root / "src" / "main.js").resolve()
+            asset = (root / "src" / "img" / "pixel.png").resolve()
+            self.assertIn(css, edges[main])
+            self.assertIn(asset, edges[css])
+            self.assertIn((root / "src" / "theme.css").resolve(), edges[css])
+
     def test_scanner_finds_static_reexport_side_effect_and_literal_dynamic_imports(self):
         source = '''
 // import "comment-only";
