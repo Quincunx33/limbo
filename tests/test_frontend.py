@@ -138,6 +138,23 @@ class FrontendServingTests(unittest.TestCase):
             missing = frontend.serve(Request("GET", "/__limbo/_importmap.json", {}))
             self.assertEqual(missing.status, 400)
 
+    def test_dev_server_uses_content_addressed_transform_cache(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "main.js").write_text("export const value = 1;", encoding="utf-8")
+            frontend = FrontendDevServer(root)
+            first = frontend.serve(Request("GET", "/__limbo/main.js", {}))
+            second = frontend.serve(Request("GET", "/__limbo/main.js", {}))
+            self.assertEqual(first.status, 200)
+            self.assertEqual(second.status, 200)
+            self.assertEqual(frontend.cache.hits, 1)
+            (root / "main.js").write_text("export const value = 2;", encoding="utf-8")
+            third = frontend.serve(Request("GET", "/__limbo/main.js", {}))
+            self.assertIn(b"value = 2", third.body)
+            self.assertEqual(frontend.cache.misses, 2)
+            hidden_cache = frontend.serve(Request("GET", "/__limbo/.limbo/cache/frontend", {}))
+            self.assertEqual(hidden_cache.status, 404)
+
     def test_css_side_effect_import_is_rewritten_and_served_as_module(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
