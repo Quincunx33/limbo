@@ -185,7 +185,7 @@ class FrontendServingTests(unittest.TestCase):
             self.assertIn(b"/__limbo/_css/src/site.css", entry.body)
             css_module = frontend.serve(Request("GET", "/__limbo/_css/src/site.css", {}))
             self.assertEqual(css_module.status, 200)
-            self.assertIn(b"fetch(", css_module.body)
+            self.assertIn(b"rel = 'stylesheet'", css_module.body)
             self.assertIn(b"document.head.appendChild", css_module.body)
             self.assertEqual(frontend.serve(Request("GET", "/__limbo/_css/src/unknown.css", {})).status, 404)
 
