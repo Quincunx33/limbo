@@ -20,7 +20,7 @@ class Limbo:
         self.name = name
         self.router = Router()
         self.middlewares: list[Callable] = []
-        self.static_mounts: list[tuple[str, Path, str | None, str, str]] = []
+        self.static_mounts: list[tuple[str, Path, str | None, str, str, str | None]] = []
         self.websocket_routes: list[tuple[object, Callable]] = []
         self.templates = TemplateEngine()
         self.frontend_servers: list[FrontendDevServer] = []

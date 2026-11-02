@@ -106,17 +106,21 @@ The compiler contract must expose capability detection, transform inputs/outputs
 ### Phase 2 — Static files, responses and middleware completeness
 **Goal:** Make ordinary web delivery complete and safe.
 
-**Status: IMPLEMENTED; cross-platform CI verification pending.** Static responses stream from open descriptors. The default symlink-deny path uses directory-relative no-follow opens on platforms exposing those primitives, with a documented best-effort fallback elsewhere; within-root links are resolved and constrained to the mount. Directory indexes are opt-in. Conditional GET precedence, weak ETags, Last-Modified, single byte ranges, 416, If-Range, HEAD metadata, MIME/cache headers and response helpers are covered. Unsupported, malformed and multi-range Range fields are ignored; valid unsatisfiable byte ranges return 416, while oversized end offsets are clamped. CORS, security headers, request IDs, access logging, bounded process-local token-bucket limiting and negotiated gzip are implemented. Integration and failure-path tests cover the built-in middleware.
+**Status: COMPLETE (2026-11-02).** Static responses stream from open file descriptors and expose an explicit Response.close() lifecycle for abandoned streams. The default symlink-deny path uses directory-relative no-follow opens where supported; portable fallback and within-root symlink race limitations are documented. Directory indexes are opt-in. Conditional GET precedence, weak ETags, Last-Modified, single byte ranges, 416, If-Range, HEAD metadata, MIME/cache headers, redirects, cookies, Vary and Accept negotiation are implemented. Unsupported units, malformed syntax and multiple ranges are ignored; valid unsatisfiable ranges return 416 and oversized end offsets are clamped. Optional SPA fallback is restricted to missing paths whose request accepts HTML; non-HTML API/asset requests remain 404. Built-in CORS, security headers, request IDs, access logging, bounded process-local token-bucket rate limiting and negotiated gzip are implemented, with integration and failure-path tests.
+
+**Verification:** Full standard-library suite passed on Linux with Python 3.10, 3.11, 3.12 and 3.13. Phase 2 static/middleware smoke suites passed on Ubuntu, Windows and macOS. CI run: https://github.com/Quincunx33/limbo/actions/runs/41465088436.
+
+**Assurance boundary:** this is implementation and CI completion, not an independent security audit or production certification. Descriptor-relative no-follow protection depends on OS support; fallback and within-root mode have weaker race guarantees. The in-memory rate limiter is process-local, not distributed. Configure deployment-specific proxy, CSP, HSTS, CORS and cache policies before public exposure.
 
 - Response cookie/header/redirect/Vary helpers and Accept negotiation.
 - Conditional GET precedence and bodyless 304 responses.
 - Single byte ranges; unsupported/malformed/multiple ranges ignored; unsatisfiable ranges return 416.
-- MIME/cache policy, optional gzip, opt-in directory indexes and symlink policy.
-- Directory-relative no-follow traversal where supported; platform fallback limitations documented.
+- MIME/cache policy, optional gzip, opt-in directory indexes, SPA fallback and symlink policy.
+- Directory-relative no-follow traversal where supported; documented platform fallbacks.
 - CORS, security headers, request IDs, access logging, rate limiting and gzip middleware.
 - Adversarial tests for traversal, symlinks, validators, range boundaries, streaming and middleware failures.
 
-**Exit gate:** Python 3.10–3.13 unit matrix and Linux/Windows/macOS smoke matrix pass. This is not independent security certification.
+**Exit gate: PASSED.**
 
 ### Phase 3 — Backend application essentials
 **Goal:** Make Limbo useful for real multi-user applications.
