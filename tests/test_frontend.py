@@ -189,6 +189,27 @@ class FrontendServingTests(unittest.TestCase):
             self.assertIn(b"document.head.appendChild", css_module.body)
             self.assertEqual(frontend.serve(Request("GET", "/__limbo/_css/src/unknown.css", {})).status, 404)
 
+    def test_package_css_asset_is_served_with_css_mime_type(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "src").mkdir()
+            package = root / "node_modules" / "theme" / "dist"
+            package.mkdir(parents=True)
+            (root / "src" / "main.js").write_text('import "theme/style.css";', encoding="utf-8")
+            (root / "node_modules" / "theme" / "package.json").write_text(
+                '{"name":"theme","exports":{"./style.css":"./dist/style.css"}}', encoding="utf-8")
+            (package / "style.css").write_text("body{color:blue}", encoding="utf-8")
+            frontend = FrontendDevServer(root)
+            entry = frontend.serve(Request("GET", "/__limbo/src/main.js", {}))
+            self.assertEqual(entry.status, 200)
+            self.assertIn(b"/__limbo/_css/node_modules/theme/dist/style.css", entry.body)
+            css_module = frontend.serve(Request("GET", "/__limbo/_css/node_modules/theme/dist/style.css", {}))
+            self.assertEqual(css_module.status, 200)
+            self.assertIn(b"stylesheet", css_module.body)
+            package_css = frontend.serve(Request("GET", "/__limbo/_pkgfile/node_modules/theme/dist/style.css", {}))
+            self.assertEqual(package_css.status, 200)
+            self.assertIn("text/css", package_css.headers.get("Content-Type", ""))
+
     def test_css_import_with_bindings_has_actionable_error(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
