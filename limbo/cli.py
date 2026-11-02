@@ -22,8 +22,8 @@ def _create(name: str, template: str = "python-api") -> int:
     if template not in {"python-api", "static", "browser-native", "vue"}:
         print(f"Error: unknown template {template!r}.", file=sys.stderr)
         return 2
-    if target.exists() and any(target.iterdir()):
-        print(f"Error: {target} already exists and is not empty.", file=sys.stderr)
+    if target.exists() and (not target.is_dir() or any(target.iterdir())):
+        print(f"Error: {target} already exists and is not an empty directory.", file=sys.stderr)
         return 2
     target.mkdir(parents=True, exist_ok=True)
     for folder in ("static", "templates", "uploads", "tests", "frontend/src", "frontend/public"):
