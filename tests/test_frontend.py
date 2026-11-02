@@ -138,6 +138,24 @@ class FrontendServingTests(unittest.TestCase):
             missing = frontend.serve(Request("GET", "/__limbo/_importmap.json", {}))
             self.assertEqual(missing.status, 400)
 
+    def test_dev_server_emits_full_reload_fallback_and_version_endpoint(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "main.js").write_text('export const value = 1;', encoding="utf-8")
+            frontend = FrontendDevServer(root)
+            tags = frontend.script_tag("main.js")
+            self.assertIn("/__limbo/_client.js", tags)
+            frontend.import_map("main.js")
+            first = frontend.serve(Request("GET", "/__limbo/_version", {}))
+            client = frontend.serve(Request("GET", "/__limbo/_client.js", {}))
+            self.assertEqual(first.status, 200)
+            self.assertEqual(client.status, 200)
+            self.assertIn(b"location.reload()", client.body)
+            old_version = json.loads(first.body)["version"]
+            (root / "main.js").write_text('export const value = 2;', encoding="utf-8")
+            new_version = frontend.serve(Request("GET", "/__limbo/_version", {}))
+            self.assertNotEqual(old_version, json.loads(new_version.body)["version"])
+
     def test_dev_server_uses_content_addressed_transform_cache(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
