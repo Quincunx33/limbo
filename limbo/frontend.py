@@ -526,7 +526,14 @@ class FrontendDevServer:
             except OSError:
                 digest.update((path.as_posix() + "|missing").encode("utf-8"))
                 continue
-            digest.update(f"{path.as_posix()}|{stat.st_mtime_ns}|{stat.st_size}\n".encode("utf-8"))
+            digest.update(path.as_posix().encode("utf-8") + b"\\0")
+            try:
+                with path.open("rb") as source:
+                    for chunk in iter(lambda: source.read(64 * 1024), b""):
+                        digest.update(chunk)
+            except OSError:
+                digest.update(b"|unreadable")
+            digest.update(b"\\n")
         return digest.hexdigest()
 
     def _rewrite_internal_imports(self, code: str, importer: Path) -> str:
@@ -562,10 +569,20 @@ class FrontendDevServer:
         source = resolved.read_bytes()
         relative = resolved.relative_to(self.root).as_posix()
         tool_identity = "limbo-frontend-v1"
-        if self.compiler.esbuild:
-            tool_identity += "|esbuild:" + self.compiler.esbuild
-        if self.compiler.node:
-            tool_identity += "|node:" + self.compiler.node
+        for label, executable in (("esbuild", self.compiler.esbuild), ("node", self.compiler.node)):
+            if executable:
+                try:
+                    stat = Path(executable).stat()
+                    tool_identity += f"|{label}:{executable}:{stat.st_mtime_ns}:{stat.st_size}"
+                except OSError:
+                    tool_identity += f"|{label}:{executable}:unstatable"
+        for package in ("@vue/compiler-sfc", "svelte"):
+            manifest = self.root / "node_modules" / package / "package.json"
+            if manifest.is_file():
+                try:
+                    tool_identity += f"|{package}:" + hashlib.sha256(manifest.read_bytes()).hexdigest()
+                except OSError:
+                    tool_identity += f"|{package}:unreadable"
         options = {"path": relative, "suffix": resolved.suffix.lower(), "tool": tool_identity}
         key = self.cache.key(source, compiler="limbo-frontend-transform-v1", options=options)
         cached = self.cache.get(key)
