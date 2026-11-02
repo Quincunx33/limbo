@@ -22,7 +22,8 @@ class LimboServer:
                  max_requests_per_connection: int = 100, backlog: int = 128,
                  trusted_hosts: tuple[str, ...] | list[str] | None = None,
                  websocket_handler: Callable[[Request, WebSocket], None] | None = None,
-                 websocket_origin_check: Callable[[Request], bool] | None = None) -> None:
+                 websocket_origin_check: Callable[[Request], bool] | None = None,
+                 websocket_options: Callable[[Request], dict[str, object]] | None = None) -> None:
         self.app, self.host, self.port = app, host, port
         self.request_timeout, self.max_header_bytes = request_timeout, max_header_bytes
         if request_timeout <= 0 or max_header_bytes < 1024 or max_body_bytes < 0:
@@ -35,6 +36,7 @@ class LimboServer:
         self.trusted_hosts = {item.lower() for item in trusted_hosts} if trusted_hosts is not None else None
         self.websocket_handler = websocket_handler
         self.websocket_origin_check = websocket_origin_check
+        self.websocket_options = websocket_options
         self._socket: socket.socket | None = None
         self._stopping = threading.Event()
         self._threads: set[threading.Thread] = set()
@@ -169,7 +171,12 @@ class LimboServer:
             return
         raw = "HTTP/1.1 101 Switching Protocols\r\n" + "".join(f"{key}: {value}\r\n" for key, value in headers.items()) + "\r\n"
         conn.sendall(raw.encode("ascii"))
-        websocket = WebSocket(conn, reader=stream)
+        options = self.websocket_options(request) if self.websocket_options is not None else {}
+        max_message_bytes = options.get("max_message_bytes", 8 * 1024 * 1024)
+        idle_timeout = options.get("idle_timeout", self.request_timeout)
+        if idle_timeout is not None:
+            conn.settimeout(float(idle_timeout))
+        websocket = WebSocket(conn, reader=stream, max_message_bytes=max_message_bytes)
         try:
             self.websocket_handler(request, websocket)
         except Exception:
