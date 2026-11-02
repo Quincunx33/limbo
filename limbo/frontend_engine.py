@@ -113,10 +113,13 @@ class EsbuildAdapter:
             raise AdapterError(f"esbuild adapter does not handle {suffix or 'extensionless'} files")
         if not self.executable:
             raise AdapterError("esbuild is not installed locally; install it in the project to enable this adapter")
+        if source is None:
+            try:
+                source = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError) as exc:
+                raise AdapterError(f"cannot read {path}: {exc}") from exc
         args = [self.executable, "--loader=" + loader, "--format=esm", "--target=es2020",
                 "--jsx=automatic", "--sourcefile=" + path.name, "--log-level=error"]
-        if source is None:
-            args.append(str(path))
         try:
             result = subprocess.run(
                 args, cwd=self.root, input=source, text=True, capture_output=True,
