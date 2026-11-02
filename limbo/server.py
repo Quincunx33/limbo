@@ -174,8 +174,7 @@ class LimboServer:
         options = self.websocket_options(request) if self.websocket_options is not None else {}
         max_message_bytes = options.get("max_message_bytes", 8 * 1024 * 1024)
         idle_timeout = options.get("idle_timeout", self.request_timeout)
-        if idle_timeout is not None:
-            conn.settimeout(float(idle_timeout))
+        conn.settimeout(None if idle_timeout is None else float(idle_timeout))
         websocket = WebSocket(conn, reader=stream, max_message_bytes=max_message_bytes)
         try:
             self.websocket_handler(request, websocket)
