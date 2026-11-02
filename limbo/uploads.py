@@ -151,7 +151,7 @@ class _StreamBuffer:
             self.fill()
 
     def part_body(self, delimiter: bytes, output, *, max_bytes: int | None,
-                  field_buffer: bytearray | None = None) -> int:
+                  field_buffer: bytearray | None = None) -> tuple[int, bool]:
         written = 0
         keep = len(delimiter) + 2
         while True:
@@ -172,9 +172,9 @@ class _StreamBuffer:
                     ending = self.read_exact(2)
                     if ending != b"\r\n":
                         raise ValueError("Malformed multipart closing boundary")
-                    return written
+                    return written, True
                 if suffix == b"\r\n":
-                    return written
+                    return written, False
                 raise ValueError("Malformed multipart boundary")
             if self.eof:
                 raise ValueError("Malformed multipart body")
@@ -251,7 +251,7 @@ def parse_multipart_stream(content_type: str, source, *, max_body_bytes: int = 8
                 path = Path(tempdir.name) / f"upload-{file_count:04d}.part"
                 size = 0
                 with path.open("xb") as output:
-                    size = reader.part_body(delimiter, output, max_bytes=max_file_bytes)
+                    size, final_part = reader.part_body(delimiter, output, max_bytes=max_file_bytes)
                 result.setdefault(field_name, []).append(
                     UploadFile(safe_name, part.get_content_type() or "application/octet-stream",
                                b"", path)
@@ -261,23 +261,17 @@ def parse_multipart_stream(content_type: str, source, *, max_body_bytes: int = 8
                 if field_count > max_fields:
                     raise UploadLimitError("Multipart field count exceeds the configured limit")
                 raw = bytearray()
-                reader.part_body(delimiter, None, max_bytes=max_body_bytes, field_buffer=raw)
+                _, final_part = reader.part_body(delimiter, None, max_bytes=max_body_bytes, field_buffer=raw)
                 charset = part.get_content_charset() or "utf-8"
                 try:
                     value = bytes(raw).decode(charset)
                 except (LookupError, UnicodeDecodeError) as exc:
                     raise ValueError("Invalid multipart text field encoding") from exc
                 result.setdefault(field_name, []).append(value)
-            # part_body consumed either CRLF (next part) or the final boundary.
-            if reader.buffer[:len(marker) + 2] == b"--" + marker:
-                reader.read_exact(len(marker) + 2)
-                if reader.read_exact(2) != b"\r\n":
-                    raise ValueError("Malformed multipart closing boundary")
+            if final_part:
                 if reader.buffer:
                     raise ValueError("Unexpected data after multipart closing boundary")
                 return result, tempdir
-            if reader.read_exact(len(marker) + 2) != b"--" + marker + b"\r\n":
-                raise ValueError("Malformed multipart boundary")
     except Exception:
         tempdir.cleanup()
         raise
