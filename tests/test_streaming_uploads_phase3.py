@@ -41,7 +41,7 @@ class StreamingMultipartTests(unittest.TestCase):
             b"POST /upload HTTP/1.1\r\n"
             b"Host: localhost\r\n"
             b"Content-Type: multipart/form-data; boundary=STREAMBOUND\r\n"
-            + framing + b"\r\n"
+            + framing + b"\r\n\r\n"
         )
         stream = io.BytesIO(headers + body)
         return self.server._read_request(stream, ("127.0.0.1", 12345))
