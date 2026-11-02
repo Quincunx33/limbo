@@ -35,6 +35,7 @@ def _create(name: str, template: str = "python-api") -> int:
     else:
         (target / "frontend" / "src" / "main.js").write_text('const root = document.querySelector("#app");\nroot.textContent = "Frontend modules are served locally by Limbo.";\n', encoding="utf-8")
         if template == "vue":
+            (target / "frontend" / "src" / "main.js").write_text('import { createApp } from "vue";\\nimport App from "./App.vue";\\ncreateApp(App).mount("#app");\\n', encoding="utf-8")
             (target / "frontend" / "src" / "App.vue").write_text('<script setup>\nimport { ref } from "vue";\nconst count = ref(0);\n</script>\n<template><main><h1>Limbo + Vue</h1><button @click="count++">Count: {{ count }}</button></main></template>\n', encoding="utf-8")
             (target / "package.json").write_text('{\n  "name": "limbo-vue-starter",\n  "private": true,\n  "dependencies": {\n    "vue": "*"\n  },\n  "devDependencies": {\n    "@vue/compiler-sfc": "*"\n  }\n}\n', encoding="utf-8")
             readme = "Install the declared frontend packages with your preferred package manager, then run python app.py. Limbo never installs packages automatically.\n"
