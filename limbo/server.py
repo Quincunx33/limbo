@@ -59,10 +59,10 @@ class _ChunkedBodyReader:
                         trailer = self.server._readline(self.stream, 8192, status=431, deadline=self.deadline)
                         if not trailer:
                             raise HTTPError(400, "Incomplete chunked trailers")
-                        if trailer == b"\\r\\n":
+                        if trailer == b"\r\\n":
                             self.finished = True
                             break
-                        if b":" not in trailer or trailer[:1] in (b" ", b"\\t"):
+                        if b":" not in trailer or trailer[:1] in (b" ", b"\t"):
                             raise HTTPError(400, "Malformed trailer")
                     continue
                 self.remaining = amount
@@ -75,7 +75,7 @@ class _ChunkedBodyReader:
             self.remaining -= take
             self.total += take
             if self.remaining == 0:
-                if self.stream.read(2) != b"\\r\\n":
+                if self.stream.read(2) != b"\r\\n":
                     raise HTTPError(400, "Malformed chunk")
         return bytes(output)
 
@@ -88,7 +88,8 @@ class LimboServer:
                  trusted_hosts: tuple[str, ...] | list[str] | None = None,
                  websocket_handler: Callable[[Request, WebSocket], None] | None = None,
                  websocket_origin_check: Callable[[Request], bool] | None = None,
-                 websocket_options: Callable[[Request], dict[str, object]] | None = None,\n                 upload_limits: dict[str, int] | None = None) -> None:
+                 websocket_options: Callable[[Request], dict[str, object]] | None = None,
+                 upload_limits: dict[str, int] | None = None) -> None:
         self.app, self.host, self.port = app, host, port
         self.request_timeout, self.max_header_bytes = request_timeout, max_header_bytes
         if request_timeout <= 0 or max_header_bytes < 1024 or max_body_bytes < 0:
