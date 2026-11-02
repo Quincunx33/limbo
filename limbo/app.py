@@ -185,8 +185,8 @@ class Limbo:
                     if req.path == frontend.prefix or req.path.startswith(frontend.prefix + "/"):
                         return frontend.serve(req)
                 if allowed:
-                    return Response.text("Method Not Allowed", 405, {"Allow": ", ".join(sorted(allowed | {"OPTIONS"}))})
-                return Response.text("Not Found", 404)
+                    return self._error_response(HTTPError(405, "Method Not Allowed"), 405)
+                return self._error_response(HTTPError(404, "Not Found"), 404)
 
             next_handler = endpoint
             for middleware in reversed(self.middlewares):

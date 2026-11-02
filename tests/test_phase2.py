@@ -225,21 +225,21 @@ class HTTPCompletionTests(unittest.TestCase):
         return server._read_request(io.BytesIO(raw), ("127.0.0.1", 1234))
 
     def test_host_authority_validation_and_allowlist(self):
-        valid = self.parse(b"GET / HTTP/1.1\\r\\nHost: localhost:8080\\r\\n\\r\\n", ["localhost"])
+        valid = self.parse(b"GET / HTTP/1.1\r\nHost: localhost:8080\r\n\r\n", ["localhost"])
         self.assertEqual(valid.host, "localhost:8080")
         for host in (b"user@localhost", b"localhost/path", b"localhost:99999", b"bad host", b"-invalid.example"):
             with self.subTest(host=host):
                 with self.assertRaises(HTTPError):
-                    self.parse(b"GET / HTTP/1.1\\r\\nHost: " + host + b"\\r\\n\\r\\n")
+                    self.parse(b"GET / HTTP/1.1\r\nHost: " + host + b"\r\n\r\n")
         with self.assertRaises(HTTPError):
-            self.parse(b"GET / HTTP/1.1\\r\\nHost: evil.example\\r\\n\\r\\n", ["localhost"])
+            self.parse(b"GET / HTTP/1.1\r\nHost: evil.example\r\n\r\n", ["localhost"])
 
     def test_deadline_rejects_slow_drip_header(self):
         left, right = socket.socketpair()
         stream = left.makefile("rb")
         try:
             left.settimeout(1)
-            right.sendall(b"GET / HTTP/1.1\\r\\nHost:")
+            right.sendall(b"GET / HTTP/1.1\r\nHost:")
             started = time.monotonic()
             with self.assertRaises((TimeoutError, OSError)):
                 self.server._read_request(stream, ("127.0.0.1", 1), deadline=time.monotonic() + 0.05)
@@ -267,7 +267,7 @@ class HTTPCompletionTests(unittest.TestCase):
             self.server._write_response(left, Response(iter([b"abc", b"de"])), "GET", False)
             data = right.recv(4096)
             self.assertIn(b"transfer-encoding: chunked", data.lower())
-            self.assertTrue(data.endswith(b"3\\r\\nabc\\r\\n2\\r\\nde\\r\\n0\\r\\n\\r\\n"))
+            self.assertTrue(data.endswith(b"3\r\nabc\r\n2\r\nde\r\n0\r\n\r\n"))
         finally:
             left.close(); right.close()
 
@@ -302,3 +302,31 @@ class HTTPCompletionTests(unittest.TestCase):
         result = app.dispatch(Request("GET", "/boom", {}))
         self.assertEqual(result.status, 418)
         self.assertEqual(result.body, b"handled: missing record")
+
+    def test_concurrent_real_socket_connections(self):
+        server = LimboServer(lambda request: Response.text("ok"), "127.0.0.1", 0, max_requests_per_connection=1)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        deadline = time.monotonic() + 2
+        while server.port == 0 and time.monotonic() < deadline: time.sleep(0.01)
+        errors = []
+        def client_request():
+            try:
+                with socket.create_connection(("127.0.0.1", server.port), timeout=2) as client:
+                    client.sendall(b"GET / HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n")
+                    response = b""
+                    while True:
+                        part = client.recv(4096)
+                        if not part: break
+                        response += part
+                    if b"200 OK" not in response: errors.append(response)
+            except Exception as exc:
+                errors.append(exc)
+        workers = [threading.Thread(target=client_request) for _ in range(24)]
+        try:
+            for worker in workers: worker.start()
+            for worker in workers: worker.join(timeout=3)
+            self.assertFalse(errors, errors)
+            self.assertTrue(all(not worker.is_alive() for worker in workers))
+        finally:
+            server.shutdown(); thread.join(timeout=2)

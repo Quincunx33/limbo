@@ -4,6 +4,8 @@ from __future__ import annotations
 import socket
 import threading
 import re
+import ipaddress
+import time
 from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Callable
@@ -18,6 +20,7 @@ class LimboServer:
                  *, request_timeout: float = 15.0, max_header_bytes: int = 32_768,
                  max_body_bytes: int = 8 * 1024 * 1024, max_header_count: int = 100,
                  max_requests_per_connection: int = 100, backlog: int = 128,
+                 trusted_hosts: tuple[str, ...] | list[str] | None = None,
                  websocket_handler: Callable[[Request, WebSocket], None] | None = None) -> None:
         self.app, self.host, self.port = app, host, port
         self.request_timeout, self.max_header_bytes = request_timeout, max_header_bytes
@@ -28,6 +31,7 @@ class LimboServer:
         self.max_body_bytes, self.backlog = max_body_bytes, backlog
         self.max_header_count = max_header_count
         self.max_requests_per_connection = max_requests_per_connection
+        self.trusted_hosts = {item.lower() for item in trusted_hosts} if trusted_hosts is not None else None
         self.websocket_handler = websocket_handler
         self._socket: socket.socket | None = None
         self._stopping = threading.Event()
@@ -80,7 +84,8 @@ class LimboServer:
             request_count = 0
             while not self._stopping.is_set():
                 try:
-                    request = self._read_request(stream, address)
+                    deadline = time.monotonic() + self.request_timeout
+                    request = self._read_request(stream, address, deadline=deadline)
                 except EOFError:
                     break
                 except HTTPError as exc:
@@ -146,7 +151,19 @@ class LimboServer:
                 try: websocket.close()
                 except OSError: pass
 
-    def _readline(self, stream, limit: int, *, status: int = 431) -> bytes:
+    def _remaining(self, stream, deadline: float | None) -> None:
+        if deadline is None:
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise HTTPError(408, "Request deadline exceeded")
+        raw = getattr(stream, "raw", None)
+        sock = getattr(raw, "_sock", None)
+        if sock is not None:
+            sock.settimeout(remaining)
+
+    def _readline(self, stream, limit: int, *, status: int = 431, deadline: float | None = None) -> bytes:
+        self._remaining(stream, deadline)
         if limit < 1:
             raise HTTPError(status, "HTTP line exceeds configured limit")
         line = stream.readline(limit + 1)
@@ -156,10 +173,10 @@ class LimboServer:
             raise HTTPError(400, "HTTP lines must end with CRLF")
         return line
 
-    def _read_request(self, stream, address: tuple) -> Request | None:
+    def _read_request(self, stream, address: tuple, *, deadline: float | None = None) -> Request | None:
         # RFC 9112 request lines are bounded independently from the aggregate
         # header section. A blank line is never silently skipped.
-        line = self._readline(stream, min(8192, self.max_header_bytes))
+        line = self._readline(stream, min(8192, self.max_header_bytes), deadline=deadline)
         if not line:
             return None
         try:
@@ -192,7 +209,7 @@ class LimboServer:
         total = len(line)
         count = 0
         while True:
-            header = self._readline(stream, min(8192, self.max_header_bytes - total))
+            header = self._readline(stream, min(8192, self.max_header_bytes - total), deadline=deadline)
             if not header:
                 raise HTTPError(400, "Incomplete headers")
             total += len(header)
@@ -226,8 +243,30 @@ class LimboServer:
 
         if version == "HTTP/1.1" and not headers.get("host", "").strip():
             raise HTTPError(400, "Host header required")
-        if "host" in headers and (not headers["host"] or any(ch.isspace() for ch in headers["host"])):
-            raise HTTPError(400, "Invalid Host header")
+        if "host" in headers:
+            host = headers["host"]
+            if not host or any(ch.isspace() for ch in host) or any(ch in host for ch in "/\\\\?#@"):
+                raise HTTPError(400, "Invalid Host header")
+            try:
+                authority = urlsplit("//" + host)
+                if not authority.hostname or authority.username is not None or authority.password is not None:
+                    raise ValueError
+                port = authority.port
+                if port is not None and not 1 <= port <= 65535:
+                    raise ValueError
+                hostname = authority.hostname.rstrip(".").lower()
+                try:
+                    ipaddress.ip_address(hostname)
+                except ValueError:
+                    label = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+                    if not re.fullmatch(r"(?=.{1,253}$)" + label + r"(?:\." + label + r")*", hostname):
+                        raise ValueError
+                if self.trusted_hosts is not None and hostname not in self.trusted_hosts:
+                    raise HTTPError(400, "Host not allowed")
+            except HTTPError:
+                raise
+            except ValueError:
+                raise HTTPError(400, "Invalid Host header")
         if "transfer-encoding" in headers and "content-length" in headers:
             raise HTTPError(400, "Conflicting body framing headers")
 
@@ -235,7 +274,7 @@ class LimboServer:
         if transfer_encoding and transfer_encoding != "chunked":
             raise HTTPError(501, "Transfer encoding not supported")
         if transfer_encoding == "chunked":
-            body = self._read_chunked(stream)
+            body = self._read_chunked(stream, deadline=deadline)
         else:
             raw_length = headers.get("content-length", "0")
             if not re.fullmatch(r"[0-9]+", raw_length):
@@ -247,6 +286,7 @@ class LimboServer:
             length = int(raw_length)
             if length > self.max_body_bytes:
                 raise HTTPError(413, "Request body too large")
+            self._remaining(stream, deadline)
             body = stream.read(length)
             if len(body) != length:
                 raise HTTPError(400, "Incomplete request body")
@@ -255,14 +295,14 @@ class LimboServer:
         request.version = version
         return request
 
-    def _read_chunked(self, stream) -> bytes:
+    def _read_chunked(self, stream, *, deadline: float | None = None) -> bytes:
         chunks: list[bytes] = []
         size_total = 0
         trailer_bytes = 0
         trailer_count = 0
         forbidden_trailers = {"content-length", "transfer-encoding", "host", "trailer"}
         while True:
-            line = self._readline(stream, 1024, status=400)
+            line = self._readline(stream, 1024, status=400, deadline=deadline)
             if not line:
                 raise HTTPError(400, "Incomplete chunked body")
             size_text = line[:-2].split(b";", 1)[0]
@@ -273,7 +313,7 @@ class LimboServer:
                 raise HTTPError(413, "Request body too large")
             if size == 0:
                 while True:
-                    trailer = self._readline(stream, min(8192, self.max_header_bytes - trailer_bytes), status=431)
+                    trailer = self._readline(stream, min(8192, self.max_header_bytes - trailer_bytes), status=431, deadline=deadline)
                     if not trailer:
                         raise HTTPError(400, "Incomplete chunked trailers")
                     trailer_bytes += len(trailer)
@@ -298,6 +338,7 @@ class LimboServer:
                         raise HTTPError(400, "Forbidden framing trailer")
                     if any(ord(ch) < 0x20 and ch != "\t" or ord(ch) == 0x7f for ch in value_text):
                         raise HTTPError(400, "Invalid trailer value")
+            self._remaining(stream, deadline)
             data = stream.read(size + 2)
             if len(data) != size + 2 or data[-2:] != b"\r\n":
                 raise HTTPError(400, "Malformed chunk")
@@ -327,9 +368,8 @@ class LimboServer:
         no_body = method == "HEAD" or status in (204, 205, 304) or 100 <= status < 200
         if "content-length" in headers and "transfer-encoding" in headers:
             raise ValueError("Conflicting response framing headers")
-        if "transfer-encoding" in headers:
-            if headers["transfer-encoding"].strip().lower() != "chunked" or not stream_body or no_body:
-                raise ValueError("Unsupported response Transfer-Encoding")
+        if "transfer-encoding" in headers and (headers["transfer-encoding"].strip().lower() != "chunked" or not stream_body or no_body):
+            raise ValueError("Unsupported response Transfer-Encoding")
         expected = None
         if "content-length" in headers:
             raw_length = headers["content-length"]
@@ -337,42 +377,29 @@ class LimboServer:
                 raise ValueError("Invalid response Content-Length")
             expected = int(raw_length)
         if status in (204, 304) or 100 <= status < 200:
-            headers.pop("content-length", None)
-            headers.pop("transfer-encoding", None)
-            expected = None
+            headers.pop("content-length", None); headers.pop("transfer-encoding", None); expected = None
         elif status == 205:
-            headers.pop("transfer-encoding", None)
-            headers["content-length"] = "0"
-            expected = 0
+            headers.pop("transfer-encoding", None); headers["content-length"] = "0"; expected = 0
         elif not stream_body:
             actual = len(response.body)
             if expected is not None and expected != actual:
                 raise ValueError("Response Content-Length does not match body")
-            headers["content-length"] = str(actual)
-            expected = actual
+            headers["content-length"] = str(actual); expected = actual
         chunked = stream_body and not no_body and headers.get("transfer-encoding", "").lower() == "chunked"
         if stream_body and not no_body and expected is None and not chunked:
-            headers["transfer-encoding"] = "chunked"
-            chunked = True
-        head = f"HTTP/1.1 {status} {phrase}\\r\\n" + "".join(f"{k}: {v}\\r\\n" for k, v in headers.items()) + "\\r\\n"
+            headers["transfer-encoding"] = "chunked"; chunked = True
+        head = f"HTTP/1.1 {status} {phrase}\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers.items()) + "\r\n"
         conn.sendall(head.encode("latin-1", "strict"))
-        if no_body:
-            return
+        if no_body: return
         if not stream_body:
-            if response.body:
-                conn.sendall(response.body)
+            if response.body: conn.sendall(response.body)
             return
         sent = 0
         for chunk in response.body:
-            if not isinstance(chunk, bytes):
-                raise TypeError("Streaming response chunks must be bytes")
-            if not chunk:
-                continue
+            if not isinstance(chunk, bytes): raise TypeError("Streaming response chunks must be bytes")
+            if not chunk: continue
             sent += len(chunk)
-            if expected is not None and sent > expected:
-                raise ValueError("Streaming response exceeds Content-Length")
-            conn.sendall((f"{len(chunk):X}\\r\\n".encode("ascii") + chunk + b"\\r\\n") if chunked else chunk)
-        if expected is not None and sent != expected:
-            raise ValueError("Streaming response length does not match Content-Length")
-        if chunked:
-            conn.sendall(b"0\\r\\n\\r\\n")
+            if expected is not None and sent > expected: raise ValueError("Streaming response exceeds Content-Length")
+            conn.sendall((f"{len(chunk):X}\r\n".encode("ascii") + chunk + b"\r\n") if chunked else chunk)
+        if expected is not None and sent != expected: raise ValueError("Streaming response length does not match Content-Length")
+        if chunked: conn.sendall(b"0\r\n\r\n")
