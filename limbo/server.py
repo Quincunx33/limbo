@@ -36,6 +36,7 @@ class LimboServer:
         self._socket: socket.socket | None = None
         self._stopping = threading.Event()
         self._threads: set[threading.Thread] = set()
+        self._connections: set[socket.socket] = set()
         self._lock = threading.Lock()
 
     def serve_forever(self) -> None:
@@ -60,6 +61,7 @@ class LimboServer:
                     raise
                 thread = threading.Thread(target=self._client, args=(conn, address), daemon=True)
                 with self._lock:
+                    self._connections.add(conn)
                     self._threads.add(thread)
                 thread.start()
         finally:
@@ -70,10 +72,24 @@ class LimboServer:
                 thread.join(timeout=1.0)
 
     def shutdown(self) -> None:
+        """Stop accepting work and actively unblock every client connection."""
         self._stopping.set()
-        if self._socket:
+        listener = self._socket
+        if listener:
             try:
-                self._socket.close()
+                listener.close()
+            except OSError:
+                pass
+        # Idle keep-alive workers otherwise remain blocked until request_timeout.
+        with self._lock:
+            connections = tuple(self._connections)
+        for conn in connections:
+            try:
+                conn.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                conn.close()
             except OSError:
                 pass
 
@@ -126,6 +142,7 @@ class LimboServer:
                 pass
             conn.close()
             with self._lock:
+                self._connections.discard(conn)
                 self._threads.discard(threading.current_thread())
 
     def _serve_websocket(self, conn: socket.socket, stream, request: Request) -> None:

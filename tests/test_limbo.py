@@ -1,4 +1,5 @@
 import json
+import http.client
 import socket
 import tempfile
 import threading
@@ -177,6 +178,71 @@ class SocketServerTests(unittest.TestCase):
                 if not part: break
                 data += part
         self.assertIn(b'{"body":"abc"}', data)
+
+
+    def test_standard_http_client_interoperability(self):
+        app = Limbo()
+        @app.get("/interop")
+        def interop(req):
+            return Response.json({"method": req.method, "host": req.host})
+        server = LimboServer(app.dispatch, "127.0.0.1", 0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        deadline = time.monotonic() + 2
+        while server.port == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        try:
+            client = http.client.HTTPConnection("127.0.0.1", server.port, timeout=2)
+            client.request("GET", "/interop", headers={"Host": "localhost"})
+            response = client.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.loads(response.read()), {"method": "GET", "host": "localhost"})
+            client.close()
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            self.assertFalse(thread.is_alive())
+
+    def test_shutdown_unblocks_sustained_idle_keep_alive_clients(self):
+        server = LimboServer(lambda request: Response.text("ok"), "127.0.0.1", 0,
+                             request_timeout=30, max_requests_per_connection=1000)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        deadline = time.monotonic() + 2
+        while server.port == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        clients = []
+        try:
+            for _ in range(24):
+                client = socket.create_connection(("127.0.0.1", server.port), timeout=2)
+                client.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                clients.append(client)
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                with server._lock:
+                    if len(server._connections) == len(clients):
+                        break
+                time.sleep(0.01)
+            with server._lock:
+                self.assertEqual(len(server._connections), len(clients))
+            started = time.monotonic()
+            server.shutdown()
+            thread.join(timeout=2)
+            self.assertFalse(thread.is_alive(), "server did not stop promptly")
+            self.assertLess(time.monotonic() - started, 2)
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline:
+                with server._lock:
+                    if not server._threads:
+                        break
+                time.sleep(0.01)
+            with server._lock:
+                self.assertFalse(server._threads, "client workers remained after shutdown")
+        finally:
+            server.shutdown()
+            for client in clients:
+                client.close()
+            thread.join(timeout=2)
 
 
 if __name__ == "__main__":

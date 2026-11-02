@@ -95,7 +95,9 @@ The compiler contract must expose capability detection, transform inputs/outputs
 
 **Already present on the engineering branch:** route groups/names/reversal/introspection; initial parser hardening; absolute request deadline; Host validation and allowlist; response framing checks; route middleware and custom error handlers; concurrent socket tests.
 
-**Still required before closing this phase:** broader proxy/interoperability coverage, sustained-load shutdown tests, external protocol review and a security review. Do not call the custom server production-certified.
+**Progress (2026-11-02):** Added a standard-library `http.client` interoperability test and active accepted-socket shutdown so idle keep-alive workers are unblocked immediately. Added a sustained idle-client shutdown regression test. These checks cover one standard HTTP client path and a bounded 24-connection shutdown scenario; they are not an exhaustive proxy matrix or a sustained throughput/load benchmark.
+
+**Still required before closing this phase:** broader proxy/interoperability coverage, sustained throughput/load tests, external protocol review and an independent security review. Do not call the custom server production-certified.
 
 **Exit gate:** supported request/response behavior is specified and tested, including malformed input, concurrency and shutdown.
 
