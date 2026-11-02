@@ -10,7 +10,7 @@ import time
 import unittest
 from pathlib import Path
 
-from limbo import (Database, Limbo, Request, SessionSigner, UploadFile,
+from limbo import (Database, Limbo, Request, Response, SessionSigner, UploadFile,
                    hash_password, session_cookie, verify_password)
 from limbo.server import LimboServer
 from limbo.http import HTTPError
@@ -151,60 +151,60 @@ class HTTPParserSecurityTests(unittest.TestCase):
 
     def test_rejects_duplicate_content_length_and_host(self):
         self.assert_rejected(
-            b"POST / HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Length: 1\\r\\n"
-            b"Content-Length: 1\\r\\n\\r\\nx"
+            b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1\r\n"
+            b"Content-Length: 1\r\n\r\nx"
         )
-        self.assert_rejected(b"GET / HTTP/1.1\\r\\nHost: a\\r\\nHost: b\\r\\n\\r\\n")
+        self.assert_rejected(b"GET / HTTP/1.1\r\nHost: a\r\nHost: b\r\n\r\n")
 
     def test_rejects_conflicting_or_unsupported_transfer_encoding(self):
         self.assert_rejected(
-            b"POST / HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Length: 0\\r\\n"
-            b"Transfer-Encoding: chunked\\r\\n\\r\\n"
+            b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n"
+            b"Transfer-Encoding: chunked\r\n\r\n"
         )
         self.assert_rejected(
-            b"POST / HTTP/1.1\\r\\nHost: localhost\\r\\nTransfer-Encoding: gzip, chunked\\r\\n\\r\\n",
+            b"POST / HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
             501,
         )
 
     def test_rejects_non_decimal_content_length_and_body_overflow(self):
-        self.assert_rejected(b"POST / HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Length: +1\\r\\n\\r\\nx")
+        self.assert_rejected(b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: +1\r\n\r\nx")
         self.assert_rejected(
-            b"POST / HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Length: 33\\r\\n\\r\\n",
+            b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 33\r\n\r\n",
             413,
         )
 
     def test_rejects_lf_only_and_malformed_request_targets(self):
-        self.assert_rejected(b"GET / HTTP/1.1\\nHost: localhost\\n\\n")
-        self.assert_rejected(b"GET http://example.com/ HTTP/1.1\\r\\nHost: example.com\\r\\n\\r\\n")
-        self.assert_rejected(b"GET /path#fragment HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\n")
+        self.assert_rejected(b"GET / HTTP/1.1\nHost: localhost\n\n")
+        self.assert_rejected(b"GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n")
+        self.assert_rejected(b"GET /path#fragment HTTP/1.1\r\nHost: localhost\r\n\r\n")
 
     def test_rejects_empty_host_and_too_many_headers(self):
-        self.assert_rejected(b"GET / HTTP/1.1\\r\\nHost: \\r\\n\\r\\n")
+        self.assert_rejected(b"GET / HTTP/1.1\r\nHost: \r\n\r\n")
         self.assert_rejected(
-            b"GET / HTTP/1.1\\r\\nHost: localhost\\r\\nA: 1\\r\\nB: 2\\r\\n"
-            b"C: 3\\r\\nD: 4\\r\\n\\r\\n",
+            b"GET / HTTP/1.1\r\nHost: localhost\r\nA: 1\r\nB: 2\r\n"
+            b"C: 3\r\nD: 4\r\n\r\n",
             431,
         )
 
     def test_chunked_body_and_trailers_are_validated(self):
         valid = self.parse(
-            b"POST / HTTP/1.1\\r\\nHost: localhost\\r\\nTransfer-Encoding: chunked\\r\\n\\r\\n"
-            b"3\\r\\nabc\\r\\n0\\r\\nX-Checksum: yes\\r\\n\\r\\n"
+            b"POST / HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n"
+            b"3\r\nabc\r\n0\r\nX-Checksum: yes\r\n\r\n"
         )
         self.assertEqual(valid.body, b"abc")
         self.assert_rejected(
-            b"POST / HTTP/1.1\\r\\nHost: localhost\\r\\nTransfer-Encoding: chunked\\r\\n\\r\\n"
-            b"z\\r\\n",
+            b"POST / HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n"
+            b"z\r\n",
         )
         self.assert_rejected(
-            b"POST / HTTP/1.1\\r\\nHost: localhost\\r\\nTransfer-Encoding: chunked\\r\\n\\r\\n"
-            b"0\\r\\nContent-Length: 0\\r\\n\\r\\n",
+            b"POST / HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n"
+            b"0\r\nContent-Length: 0\r\n\r\n",
         )
 
     def test_chunked_body_limit_is_enforced(self):
         self.assert_rejected(
-            b"POST / HTTP/1.1\\r\\nHost: localhost\\r\\nTransfer-Encoding: chunked\\r\\n\\r\\n"
-            b"21\\r\\n",
+            b"POST / HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n"
+            b"21\r\n",
             413,
         )
 

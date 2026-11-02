@@ -164,7 +164,7 @@ class LimboServer:
             return None
         try:
             raw = line[:-2]
-            if any(byte < 0x21 or byte > 0x7e for byte in raw):
+            if any(byte < 0x20 or byte > 0x7e for byte in raw):
                 raise ValueError
             parts = raw.decode("ascii").split(" ")
             if len(parts) != 3 or not all(parts):
