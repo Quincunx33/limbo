@@ -13,6 +13,7 @@ from pathlib import Path
 
 from . import __version__
 from .frontend import FrontendCompiler
+from .frontend_engine import AdapterRegistry, BrowserNativeAdapter, EsbuildAdapter
 from .config import ConfigError, load_config
 from .project import ProjectMetadataError, edit_package_metadata, preview_directory
 
@@ -132,6 +133,9 @@ def main(argv: list[str] | None = None) -> int:
     frontend_sub = frontend.add_subparsers(dest="frontend_command", required=True)
     frontend_doctor = frontend_sub.add_parser("doctor", help="inspect optional frontend tools")
     frontend_doctor.add_argument("directory", nargs="?", default=".")
+    frontend_capabilities = frontend_sub.add_parser("capabilities", help="print the machine-readable compiler capability manifest")
+    frontend_capabilities.add_argument("directory", nargs="?", default=".")
+    frontend_capabilities.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args(argv)
     if args.command == "create": return _create(args.name, args.template)
     if args.command in ("add", "remove"):
@@ -191,6 +195,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "build":
         print("Production frontend builds are not implemented in Limbo 0.3.0; no build was run.", file=sys.stderr)
         return 2
+    if args.command == "frontend" and args.frontend_command == "capabilities":
+        try:
+            registry = AdapterRegistry((BrowserNativeAdapter(), EsbuildAdapter(args.directory)))
+            manifest = registry.manifest()
+        except (OSError, ValueError) as exc:
+            print(f"Error: {exc}", file=sys.stderr); return 2
+        if args.as_json:
+            print(json.dumps(manifest, indent=2, sort_keys=True))
+        else:
+            for adapter in manifest["adapters"]:
+                state = "available" if adapter["available"] else "unavailable (optional tool missing)"
+                print(f"{adapter['adapter_id']}: {state} — {adapter['reason']}")
+        return 0
     if args.command == "frontend" and args.frontend_command == "doctor":
         try:
             capabilities = FrontendCompiler(args.directory).doctor()
