@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 from limbo import Limbo, Request, Response, SessionStore, session_middleware
 
@@ -154,7 +155,7 @@ class ApplicationLifecycleTests(unittest.TestCase):
         def shutdown_second():
             events.append("shutdown-second")
 
-        with unittest.mock.patch("limbo.app.LimboServer") as server_class:
+        with mock.patch("limbo.app.LimboServer") as server_class:
             server_class.return_value.serve_forever.return_value = None
             app.run()
         self.assertEqual(events, ["startup", "shutdown-second", "shutdown-first"])
@@ -162,7 +163,7 @@ class ApplicationLifecycleTests(unittest.TestCase):
 
     def test_shutdown_requests_server_stop(self):
         app = Limbo()
-        fake = unittest.mock.Mock()
+        fake = mock.Mock()
         app._server = fake
         app.shutdown()
         fake.shutdown.assert_called_once_with()
