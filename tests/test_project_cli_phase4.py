@@ -54,6 +54,13 @@ class ProjectMetadataTests(unittest.TestCase):
             with self.assertRaises(ProjectMetadataError):
                 edit_package_metadata(directory, "add", "react")
 
+    def test_remove_missing_package_is_actionable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "package.json"
+            path.write_text("{}", encoding="utf-8")
+            with self.assertRaises(ProjectMetadataError):
+                edit_package_metadata(directory, "remove", "missing")
+
     def test_preview_requires_existing_output_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "dist"
