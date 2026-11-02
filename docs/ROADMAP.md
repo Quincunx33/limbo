@@ -164,16 +164,16 @@ The compiler contract must expose capability detection, transform inputs/outputs
 
 **Verification added:** unit coverage for native JS/CSS pass-through, extension rejection, project-root enforcement, duplicate adapter IDs, stable manifest JSON and CLI output; lexical ESM/CSS scanner coverage; CSS module serving; content-addressed cache persistence/invalidation; optional Vue/Svelte adapter detection; and full-reload endpoint/version behavior. The Phase 5 test file is included in the Linux/Windows/macOS platform-smoke workflow and the complete Python-version unit suite.
 
-**Remaining Phase 5 work:** parser-grade JS edge cases and full package `exports`/`imports` condition semantics; route all live transforms through the adapter registry; source-map generation/serving; state-preserving HMR (the current implementation is full-reload only); stronger incremental graph invalidation; and real browser-level fixtures including WASM. Package export maps, aliases, CSS/asset graph edges, cache invalidation and reload fallback have initial implementations and need broader fixture coverage. This phase is not complete until real sample apps pass the end-to-end exit gate.
+**Remaining Phase 5 work:** parser-grade JS edge cases and full package `exports`/`imports` condition semantics; route all live transforms through the adapter registry; SFC source-map generation/serving and source-map integration for adapters beyond esbuild; state-preserving HMR (the current implementation is full-reload only); stronger incremental graph invalidation; and real browser-level fixtures including WASM. Package export maps, aliases, CSS/asset graph edges, cache invalidation and reload fallback have initial implementations and need broader fixture coverage. This phase is not complete until real sample apps pass the end-to-end exit gate.
 
 1. Specify compiler adapter API and machine-readable capability manifest. **Foundation implemented; continue evolving contract against real adapters.**
-2. Upgrade dependency discovery beyond regex-only literal imports; handle static ESM, re-exports, CSS imports, assets and supported dynamic imports. **Lexical ESM/CSS scanner and initial graph integration implemented.**
+2. Upgrade dependency discovery beyond regex-only literal imports; handle static ESM, re-exports, CSS imports, assets and supported dynamic imports. **Lexical ESM/CSS scanner and initial graph integration implemented; CSS imports are relative-only, and binary assets are graph leaves.**
 3. Implement package resolution rules: package exports/imports, conditions, aliases, extensions, index files and deterministic errors.
 4. Add adapters for browser-native modules, TypeScript, JSX/TSX and CSS/assets. **Initial browser-native and esbuild adapters added; full integration pending.**
 5. Add official local compiler adapters for Vue and Svelte; then evaluate Preact, Solid, Lit, Angular and others independently. **Optional Vue/Svelte SFC adapters registered; runtime compatibility remains experimental.**
 6. Build persistent content-addressed cache keyed by source, compiler version, options and dependency state. **Initial persistent source/options/tool cache implemented; dependency-aware invalidation needs more coverage.**
 7. Add incremental invalidation and dependency graph updates.
-8. Add source-map generation/serving and useful compiler diagnostics.
+8. Add source-map generation/serving and useful compiler diagnostics. **Inline source maps are emitted by the esbuild TS/JSX adapter; SFC/source-map serving coverage remains.**
 9. Implement HMR protocol and client runtime with safe full-reload fallback. **Full-reload polling fallback implemented; state-preserving HMR remains.**
 10. Handle WASM assets, MIME types, import/instantiate patterns and browser compatibility checks.
 
