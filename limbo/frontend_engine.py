@@ -85,7 +85,7 @@ class EsbuildAdapter:
         extensions=(".ts", ".tsx", ".jsx"),
         available=False,
         requires=("esbuild",),
-        source_maps=False,
+        source_maps=True,
         hmr=False,
         status="optional",
         reason="Requires a locally installed esbuild executable; no automatic installation.",
@@ -119,7 +119,7 @@ class EsbuildAdapter:
             except (OSError, UnicodeError) as exc:
                 raise AdapterError(f"cannot read {path}: {exc}") from exc
         args = [self.executable, "--loader=" + loader, "--format=esm", "--target=es2020",
-                "--jsx=automatic", "--sourcefile=" + path.name, "--log-level=error"]
+                "--jsx=automatic", "--sourcemap=inline", "--sourcefile=" + path.name, "--log-level=error"]
         try:
             result = subprocess.run(
                 args, cwd=self.root, input=source, text=True, capture_output=True,
