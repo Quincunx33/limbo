@@ -119,9 +119,6 @@ class SessionMiddlewareTests(unittest.TestCase):
         self.assertIn("Secure", result.cookies[0])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class RequestConvenienceTests(unittest.TestCase):
     def test_header_query_path_cookie_and_form_accessors(self):
@@ -224,3 +221,7 @@ class WebSocketOriginPolicyTests(unittest.TestCase):
         finally:
             server.shutdown()
             thread.join(timeout=2)
+
+
+if __name__ == "__main__":
+    unittest.main()

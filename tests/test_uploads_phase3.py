@@ -54,14 +54,10 @@ class UploadLifecycleTests(unittest.TestCase):
                 upload.save(directory, "other.txt", chunk_size=0)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ConfiguredUploadLimitTests(unittest.TestCase):
     def test_application_upload_file_and_body_limits_map_to_413(self):
-        body = (b'--BOUND\\r\\nContent-Disposition: form-data; name="file"; filename="x.bin"\\r\\n'
-                b'Content-Type: application/octet-stream\\r\\n\\r\\n1234\\r\\n--BOUND--\\r\\n')
+        body = (b'--BOUND\r\nContent-Disposition: form-data; name="file"; filename="x.bin"\r\n'
+                b'Content-Type: application/octet-stream\r\n\r\n1234\r\n--BOUND--\r\n')
         app = Limbo(max_body_bytes=1024, max_upload_file_bytes=3)
         @app.post("/upload")
         def upload(request):
@@ -78,9 +74,9 @@ class ConfiguredUploadLimitTests(unittest.TestCase):
         self.assertEqual(small.dispatch(Request("POST", "/upload", {}, b"123")).status, 413)
 
     def test_application_enforces_file_count_and_malformed_multipart_status(self):
-        body = (b'--BOUND\\r\\nContent-Disposition: form-data; name="a"; filename="a.txt"\\r\\n\\r\\na\\r\\n'
-                b'--BOUND\\r\\nContent-Disposition: form-data; name="b"; filename="b.txt"\\r\\n\\r\\nb\\r\\n'
-                b'--BOUND--\\r\\n')
+        body = (b'--BOUND\r\nContent-Disposition: form-data; name="a"; filename="a.txt"\r\n\r\na\r\n'
+                b'--BOUND\r\nContent-Disposition: form-data; name="b"; filename="b.txt"\r\n\r\nb\r\n'
+                b'--BOUND--\r\n')
         app = Limbo(max_upload_files=1)
         @app.post("/upload")
         def upload(request):
@@ -93,3 +89,7 @@ class ConfiguredUploadLimitTests(unittest.TestCase):
             "content-type": "multipart/form-data; boundary=BOUND"
         }, b"not multipart"))
         self.assertEqual(malformed.status, 400)
+
+
+if __name__ == "__main__":
+    unittest.main()
