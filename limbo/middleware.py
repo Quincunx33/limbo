@@ -179,3 +179,67 @@ def rate_limit(*, capacity: int = 60, refill_rate: float = 1.0,
                 buckets.popitem(last=False)
         return next_handler(request)
     return middleware
+
+
+
+def gzip_compress(*, minimum_size: int = 500, level: int = 6) -> Callable:
+    """Negotiate gzip for compressible responses using the standard library."""
+    import zlib
+    if minimum_size < 0 or not 0 <= level <= 9:
+        raise ValueError("Invalid gzip compression configuration")
+
+    def gzip_quality(header: str) -> float:
+        wildcard = None
+        explicit = None
+        for item in header.split(","):
+            pieces = [part.strip() for part in item.split(";")]
+            coding = pieces[0].lower()
+            quality = 1.0
+            for parameter in pieces[1:]:
+                if parameter.lower().startswith("q="):
+                    try: quality = float(parameter[2:])
+                    except ValueError: quality = 0.0
+            if not 0.0 <= quality <= 1.0: quality = 0.0
+            if coding == "gzip": explicit = quality
+            elif coding == "*": wildcard = quality
+        return explicit if explicit is not None else (wildcard or 0.0)
+
+    def middleware(request: Request, next_handler: Callable) -> Response:
+        response = next_handler(request)
+        content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
+        compressible = (content_type.startswith("text/") or content_type in {
+            "application/json", "application/javascript", "application/xml",
+            "application/xhtml+xml", "image/svg+xml", "application/manifest+json",
+        })
+        _merge_vary(response, "Accept-Encoding")
+        if (not compressible or request.method == "HEAD" or response.status < 200
+                or response.status in {204, 205, 206, 304}
+                or "Content-Encoding" in response.headers
+                or "Content-Range" in response.headers
+                or "no-transform" in response.headers.get("Cache-Control", "").lower()
+                or gzip_quality(request.headers.get("accept-encoding", "")) <= 0):
+            return response
+        if isinstance(response.body, bytes):
+            if len(response.body) < minimum_size:
+                return response
+            response.body = zlib.compress(response.body, level, zlib.DEFLATED,
+                                          16 + zlib.MAX_WBITS)
+        else:
+            def compressed_chunks():
+                compressor = zlib.compressobj(level, zlib.DEFLATED, 16 + zlib.MAX_WBITS)
+                for chunk in response.body:
+                    if not isinstance(chunk, bytes):
+                        raise TypeError("Streaming response chunks must be bytes")
+                    output = compressor.compress(chunk)
+                    if output:
+                        yield output
+                tail = compressor.flush()
+                if tail:
+                    yield tail
+            response.body = compressed_chunks()
+        response.headers["Content-Encoding"] = "gzip"
+        for key in tuple(response.headers):
+            if key.lower() == "content-length":
+                del response.headers[key]
+        return response
+    return middleware
