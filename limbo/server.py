@@ -59,7 +59,7 @@ class _ChunkedBodyReader:
                         trailer = self.server._readline(self.stream, 8192, status=431, deadline=self.deadline)
                         if not trailer:
                             raise HTTPError(400, "Incomplete chunked trailers")
-                        if trailer == b"\r\\n":
+                        if trailer == b"\r\n":
                             self.finished = True
                             break
                         if b":" not in trailer or trailer[:1] in (b" ", b"\t"):
@@ -75,7 +75,7 @@ class _ChunkedBodyReader:
             self.remaining -= take
             self.total += take
             if self.remaining == 0:
-                if self.stream.read(2) != b"\r\\n":
+                if self.stream.read(2) != b"\r\n":
                     raise HTTPError(400, "Malformed chunk")
         return bytes(output)
 
