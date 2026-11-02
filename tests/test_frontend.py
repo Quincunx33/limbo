@@ -199,6 +199,15 @@ class FrontendServingTests(unittest.TestCase):
             self.assertEqual(response.status, 422)
             self.assertIn(b"side-effect import", response.body)
 
+    def test_wasm_asset_is_served_with_browser_mime_type(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "module.wasm").write_bytes(b"\\x00asm\\x01\\x00\\x00\\x00")
+            response = FrontendDevServer(root).serve(Request("GET", "/__limbo/module.wasm", {}))
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.body, b"\\x00asm\\x01\\x00\\x00\\x00")
+            self.assertIn("application/wasm", response.headers.get("Content-Type", ""))
+
     def test_optional_esbuild_failure_is_actionable(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "main.ts"
