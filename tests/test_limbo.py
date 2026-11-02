@@ -270,7 +270,7 @@ class SocketServerTests(unittest.TestCase):
                 if not part:
                     break
                 data += part
-            self.assertTrue(data.startswith(b"HTTP/1.0 200 OK\\r\\n"))
+            self.assertTrue(data.startswith(b"HTTP/1.0 200 OK\r\n"))
             self.assertNotIn(b"transfer-encoding", data.lower())
             self.assertTrue(data.endswith(b"stream"))
         finally:
@@ -282,9 +282,9 @@ class SocketServerTests(unittest.TestCase):
         server = LimboServer(lambda request: Response.text("ok"), "127.0.0.1", 0)
         request = server._read_request(
             io.BytesIO(
-                b"GET / HTTP/1.1\\r\\nHost: origin.example\\r\\n"
-                b"X-Forwarded-For: 203.0.113.8\\r\\nX-Forwarded-Proto: https\\r\\n"
-                b"Via: 1.1 edge-proxy\\r\\n\\r\\n"
+                b"GET / HTTP/1.1\r\nHost: origin.example\r\n"
+                b"X-Forwarded-For: 203.0.113.8\r\nX-Forwarded-Proto: https\r\n"
+                b"Via: 1.1 edge-proxy\r\n\r\n"
             ),
             ("127.0.0.1", 1234),
         )
