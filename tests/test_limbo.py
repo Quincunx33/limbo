@@ -58,7 +58,7 @@ class AppTests(unittest.TestCase):
             self.app.static("/assets", root)
             partial = self.app.dispatch(Request("GET", "/assets/hello.txt", {"range": "bytes=2-5"}))
             self.assertEqual(partial.status, 206)
-            self.assertEqual(partial.body, b"2345")
+            self.assertEqual(b"".join(partial.body), b"2345")
             escaped = self.app.dispatch(Request("GET", "/assets/%2e%2e/secret", {}))
             self.assertEqual(escaped.status, 404)
 
