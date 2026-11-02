@@ -18,6 +18,7 @@ class Request:
     scheme: str = "http"
     path_params: dict[str, str] = field(default_factory=dict)
     version: str = "HTTP/1.1"
+    state: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         parsed = urlsplit(self.target)
@@ -124,6 +125,57 @@ class Response:
             raise ValueError("Invalid cookie") from exc
         self.cookies.append(morsel.OutputString())
         return self
+
+    def accepts(self, media_type: str) -> bool:
+        """Return whether the request's Accept header permits a media type."""
+        requested = media_type.split(";", 1)[0].strip().lower()
+        if "/" not in requested:
+            raise ValueError("media_type must be a type/subtype value")
+        accept = self.headers.get("accept")
+        if not accept:
+            return True
+        best = -1.0
+        for item in accept.split(","):
+            pieces = [part.strip() for part in item.split(";")]
+            pattern = pieces[0].lower()
+            quality = 1.0
+            for parameter in pieces[1:]:
+                if parameter.lower().startswith("q="):
+                    try: quality = float(parameter[2:])
+                    except ValueError: quality = 0.0
+            if not 0.0 <= quality <= 1.0: quality = 0.0
+            if pattern == requested:
+                best = max(best, quality)
+            elif pattern == "*/*":
+                best = max(best, quality)
+            elif pattern.endswith("/*") and requested.startswith(pattern[:-1]):
+                best = max(best, quality)
+        return best > 0
+
+    def add_vary(self, *names: str) -> "Response":
+        current_key = next((key for key in self.headers if key.lower() == "vary"), None)
+        existing = [] if current_key is None else [part.strip() for part in self.headers[current_key].split(",")]
+        seen = {item.lower() for item in existing}
+        for name in names:
+            if name == "*":
+                existing = ["*"]
+                break
+            if not name or any(char in name for char in ",\\r\\n"):
+                raise ValueError("Invalid Vary field name")
+            if name.lower() not in seen:
+                existing.append(name)
+                seen.add(name.lower())
+        if current_key is not None: del self.headers[current_key]
+        self.headers["Vary"] = ", ".join(existing)
+        return self
+
+    @classmethod
+    def redirect(cls, location: str, status: int = 303) -> "Response":
+        if status not in {301, 302, 303, 307, 308}:
+            raise ValueError("Redirect status must be 301, 302, 303, 307 or 308")
+        if not isinstance(location, str) or not location or any(ord(ch) < 0x20 or ord(ch) == 0x7f for ch in location):
+            raise ValueError("Invalid redirect location")
+        return cls(b"", status, {"Location": location})
 
     @classmethod
     def json(cls, value: Any, status: int = 200, headers: dict[str, str] | None = None) -> "Response":
