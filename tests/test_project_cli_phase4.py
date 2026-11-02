@@ -46,6 +46,8 @@ class ProjectMetadataTests(unittest.TestCase):
             with self.assertRaises(ProjectMetadataError):
                 edit_package_metadata(directory, "add", "../escape")
             with self.assertRaises(ProjectMetadataError):
+                edit_package_metadata(directory, "add", "BadName")
+            with self.assertRaises(ProjectMetadataError):
                 edit_package_metadata(directory, "add", "react")
 
     def test_reject_malformed_package_json(self):
