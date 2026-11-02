@@ -42,6 +42,14 @@ class FrontendAdapterContractTests(unittest.TestCase):
         self.assertEqual([(r.specifier, r.kind) for r in refs],
                          [("theme.css", "import"), ("../img/hero.webp", "asset")])
 
+    def test_css_graph_rejects_bare_dependencies_with_actionable_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "main.js").write_text('import "./theme.css";', encoding="utf-8")
+            (root / "theme.css").write_text('@import "package-theme.css";', encoding="utf-8")
+            with self.assertRaisesRegex(Exception, "Bare CSS dependency"):
+                DependencyGraph(ModuleResolver(root)).build("main.js")
+
     def test_dependency_graph_tracks_css_and_binary_asset_edges(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
