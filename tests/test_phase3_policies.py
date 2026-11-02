@@ -123,9 +123,9 @@ class UploadConfigurationTests(unittest.TestCase):
 
     def test_configured_file_and_form_count_limits_are_enforced(self):
         two_files = (
-            b'--BOUND\\r\\nContent-Disposition: form-data; name="a"; filename="a.txt"\\r\\n\\r\\na\\r\\n'
-            b'--BOUND\\r\\nContent-Disposition: form-data; name="b"; filename="b.txt"\\r\\n\\r\\nb\\r\\n'
-            b'--BOUND--\\r\\n'
+            b'--BOUND\r\nContent-Disposition: form-data; name="a"; filename="a.txt"\r\n\r\na\r\n'
+            b'--BOUND\r\nContent-Disposition: form-data; name="b"; filename="b.txt"\r\n\r\nb\r\n'
+            b'--BOUND--\r\n'
         )
         files_app = Limbo(max_upload_files=1)
         @files_app.post("/upload")
@@ -136,9 +136,9 @@ class UploadConfigurationTests(unittest.TestCase):
         }, two_files)).status, 413)
 
         two_fields = (
-            b'--BOUND\\r\\nContent-Disposition: form-data; name="a"\\r\\n\\r\\na\\r\\n'
-            b'--BOUND\\r\\nContent-Disposition: form-data; name="b"\\r\\n\\r\\nb\\r\\n'
-            b'--BOUND--\\r\\n'
+            b'--BOUND\r\nContent-Disposition: form-data; name="a"\r\n\r\na\r\n'
+            b'--BOUND\r\nContent-Disposition: form-data; name="b"\r\n\r\nb\r\n'
+            b'--BOUND--\r\n'
         )
         fields_app = Limbo(max_form_fields=1)
         @fields_app.post("/form")
