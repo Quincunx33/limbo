@@ -83,3 +83,6 @@ python -m unittest discover -s tests -v
 ## Security note
 
 This is an early release. Keep it bound to localhost while evaluating. Session payloads are signed but **not encrypted**, so do not place secrets in them. Password hashing uses scrypt with a fixed conservative default; assess resource policy for your deployment. The built-in static server checks resolved paths remain within the configured root; it does not promise a comprehensive security boundary against every filesystem race, malformed HTTP edge case, or hostile deployment environment. Set an upstream reverse proxy and review the code before any public deployment.
+
+
+See [Static delivery and middleware](docs/STATIC_AND_MIDDLEWARE.md) for static mounts, conditional/range responses, middleware, compression and SPA fallback behavior.

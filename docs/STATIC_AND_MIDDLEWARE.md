@@ -13,6 +13,9 @@ app.static(
     cache_control="public, max-age=3600",
     symlinks="deny",
 )
+
+# Optional: use this for a client-side routed application.
+app.static("/app", "frontend-dist", spa_fallback="index.html")
 ```
 
 - Only GET and HEAD are served. Other methods receive 405.
@@ -22,6 +25,7 @@ app.static(
 - Files are streamed in bounded chunks. The open descriptor is the source of truth after path resolution.
 - Weak metadata ETags, Last-Modified, conditional GET, single byte ranges, If-Range, MIME and Cache-Control are emitted. Unsupported units, malformed syntax and multiple ranges are ignored; valid but unsatisfiable byte ranges return 416. End offsets beyond the file size are clamped.
 - HEAD returns representation headers without sending a body.
+- Optional SPA fallback serves only missing paths that accept `text/html`; missing API routes and JS/CSS assets remain 404.
 
 ## Response helpers
 

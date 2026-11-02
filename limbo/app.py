@@ -124,8 +124,8 @@ class Limbo:
 
     def static(self, url_prefix: str, directory: str | os.PathLike[str], *,
                index: str | None = None, cache_control: str = "public, max-age=0, must-revalidate",
-               symlinks: str = "deny") -> None:
-        """Mount a directory with explicit index and symlink policies."""
+               symlinks: str = "deny", spa_fallback: str | None = None) -> None:
+        """Mount static files with optional safe SPA navigation fallback."""
         prefix = "/" + url_prefix.strip("/")
         if prefix == "/":
             raise ValueError("Static URL prefix cannot be root")
@@ -133,12 +133,16 @@ class Limbo:
             raise ValueError("symlinks must be 'deny' or 'within-root'")
         if index is not None and (not index or "/" in index or "\\" in index or index in {".", ".."}):
             raise ValueError("Static index must be a single safe filename")
+        if spa_fallback is not None:
+            fallback_parts = spa_fallback.split("/")
+            if not spa_fallback or spa_fallback.startswith("/") or "\\" in spa_fallback or any(part in {"", ".", ".."} for part in fallback_parts):
+                raise ValueError("SPA fallback must be a safe relative path")
         if any(existing[0] == prefix for existing in self.static_mounts):
             raise ValueError(f"Static URL prefix already mounted: {prefix}")
         root = Path(directory).expanduser().resolve(strict=True)
         if not root.is_dir():
             raise ValueError("Static directory must be a directory")
-        self.static_mounts.append((prefix, root, index, cache_control, symlinks))
+        self.static_mounts.append((prefix, root, index, cache_control, symlinks, spa_fallback))
 
     @staticmethod
     def html(value: str, status: int = 200, headers: dict[str, str] | None = None) -> Response:
@@ -151,9 +155,7 @@ class Limbo:
 
     @staticmethod
     def redirect(location: str, status: int = 303) -> Response:
-        if "\r" in location or "\n" in location:
-            raise ValueError("Invalid redirect location")
-        return Response(b"", status, {"Location": location})
+        return Response.redirect(location, status)
 
     @staticmethod
     def send_file(path: str | os.PathLike[str], *, download_name: str | None = None) -> Response:
@@ -191,9 +193,9 @@ class Limbo:
                     return endpoint(req)
                 if req.method == "OPTIONS" and allowed:
                     return Response(b"", 204, {"Allow": ", ".join(sorted(allowed | {"OPTIONS"}))})
-                for prefix, root, index, cache_control, symlinks in self.static_mounts:
+                for prefix, root, index, cache_control, symlinks, spa_fallback in self.static_mounts:
                     if req.path == prefix or req.path.startswith(prefix + "/"):
-                        return self._serve_static(req, prefix, root, index, cache_control, symlinks)
+                        return self._serve_static(req, prefix, root, index, cache_control, symlinks, spa_fallback)
                 for frontend in self.frontend_servers:
                     if req.path == frontend.prefix or req.path.startswith(frontend.prefix + "/"):
                         return frontend.serve(req)
@@ -231,7 +233,8 @@ class Limbo:
     def _serve_static(self, request: Request, prefix: str, root: Path,
                       index: str | None = None,
                       cache_control: str = "public, max-age=0, must-revalidate",
-                      symlinks: str = "deny") -> Response:
+                      symlinks: str = "deny",
+                      spa_fallback: str | None = None) -> Response:
         if request.method not in {"GET", "HEAD"}:
             return Response.text("Method Not Allowed", 405, {"Allow": "GET, HEAD, OPTIONS"})
         relative = unquote(request.path[len(prefix):].strip("/"))
@@ -241,6 +244,10 @@ class Limbo:
         if any(part in {"", ".", ".."} for part in parts):
             return Response.text("Not Found", 404)
         candidate = root.joinpath(*parts)
+        # SPA fallback is restricted to HTML navigation and missing paths.
+        if spa_fallback and request.accepts("text/html") and not candidate.exists():
+            parts = spa_fallback.split("/")
+            candidate = root.joinpath(*parts)
         descriptor = None
         try:
             if symlinks == "deny" and os.open in getattr(os, "supports_dir_fd", set()):

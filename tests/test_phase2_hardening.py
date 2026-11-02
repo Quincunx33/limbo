@@ -59,6 +59,25 @@ class StaticAdversarialTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual(b"".join(response.body), b"0123456789")
 
+
+    def test_spa_fallback_is_limited_to_html_navigation(self):
+        (self.root / "index.html").write_text("<main>SPA</main>", encoding="utf-8")
+        spa = Limbo()
+        spa.static("/app", self.root, spa_fallback="index.html")
+        page = spa.dispatch(Request("GET", "/app/settings/profile", {"accept": "text/html"}))
+        self.assertEqual(page.status, 200)
+        self.assertEqual(b"".join(page.body), b"<main>SPA</main>")
+        asset = spa.dispatch(Request("GET", "/app/missing.js", {"accept": "application/javascript"}))
+        self.assertEqual(asset.status, 404)
+        api = Limbo()
+        api.get("/api/data")(lambda req: {"ok": True})
+        self.assertEqual(api.dispatch(Request("GET", "/api/missing", {"accept": "text/html"})).status, 404)
+
+    def test_spa_fallback_path_must_be_relative_and_contained(self):
+        for value in ("../outside.html", "/index.html", "nested/../../outside", "nested\\\\secret"):
+            with self.assertRaises(ValueError):
+                Limbo().static("/app", self.root, spa_fallback=value)
+
     def test_directory_index_is_opened_through_safe_directory_walk(self):
         response = self.get("/static/nested/")
         self.assertEqual(response.status, 200)
