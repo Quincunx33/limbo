@@ -76,7 +76,7 @@ def logout(request):
 
 For unsafe browser requests, send the readable CSRF cookie token in the X-CSRF-Token header, or use the _csrf field in URL-encoded forms. Multipart requests should use the header. Do not expose the CSRF secret in source control.
 
-BackgroundTasks is available as app.background_tasks; it bounds running plus queued work and shuts down with the app. It is not a durable queue. Use @app.on_startup and @app.on_shutdown for synchronous resource lifecycle hooks. WebSocket routes can opt into exact Origin checks with @app.websocket("/ws", origins=("https://app.example",)).
+BackgroundTasks is available as app.background_tasks; it bounds running plus queued work and shuts down with the app. It is not a durable queue. Use @app.on_startup and @app.on_shutdown for synchronous resource lifecycle hooks. WebSocket routes can set exact Origin checks, message-size limits and idle timeouts with @app.websocket("/ws", origins=("https://app.example",), max_message_bytes=65536, idle_timeout=30). Authentication and authorization helpers are extension points: authenticate(resolve_user) attaches request.user, and authorize(check) evaluates an application-defined policy. SessionBackend is a structural contract for user-supplied persistent/shared stores; Limbo does not ship a database-backed session adapter.
 
 ## Frontend preview
 
@@ -98,7 +98,7 @@ Framework adapters are intentionally partial: React TSX syntax can be transforme
 
 ## Not implemented (do not assume support)
 
-Full React runtime integration, HMR, persistent compiler caching, CSS modules, general CSS import processing, production build optimization, code splitting, framework SSR, an integrated login/authorization system, persistent/shared session adapters, database migrations/pooling, configuration loading from TOML, Cloudflare Tunnel management, and named tunnel lifecycle are not implemented. Multipart parsing still receives the bounded request body in memory; a true socket-to-disk streaming parser remains future work. Background tasks are in-process and non-durable. WebSockets do not support extensions/compression; Origin checks are opt-in per route. Node.js and cloudflared are not used or downloaded by the core. `limbo dev --public` is not available.
+Full React runtime integration, HMR, persistent compiler caching, CSS modules, general CSS import processing, production build optimization, code splitting, framework SSR, a built-in account/user store, packaged persistent session adapters, database migrations/pooling, configuration loading from TOML, Cloudflare Tunnel management, and named tunnel lifecycle are not implemented. Authentication/authorization middleware hooks and a persistent-session adapter contract exist, but applications must provide credential verification, identity storage and any durable session backend. Multipart parsing still buffers the bounded HTTP request body before parsing; true socket-to-disk streaming and request-scoped temporary-file cleanup remain future work. Background tasks are in-process and non-durable. WebSockets do not support extensions/compression; Origin checks are opt-in per route. Node.js and cloudflared are not used or downloaded by the core. `limbo dev --public` is not available.
 
 ## Static delivery and middleware
 
@@ -118,3 +118,8 @@ This is an early release. Keep it bound to localhost while evaluating. Stateless
 
 
 See [Static delivery and middleware](docs/STATIC_AND_MIDDLEWARE.md) for static mounts, conditional/range responses, middleware, compression and SPA fallback behavior.
+
+
+## Phase 3 end-to-end example
+
+See [`examples/phase3_app.py`](examples/phase3_app.py) for a runnable integration of sessions, CSRF, authentication/authorization extension points, bounded uploads, WebSocket policies and background tasks. Set `LIMBO_CSRF_SECRET` to at least 32 random bytes before running it. The demo identity map is intentionally not a real login system.
