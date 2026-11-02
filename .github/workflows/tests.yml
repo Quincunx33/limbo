@@ -44,11 +44,13 @@ jobs:
           python -c "import limbo; print(limbo.__version__)"
           python -m compileall -q limbo tests
       - name: Run Phase 2 static and middleware tests
+        shell: bash
         run: |
           python -m unittest discover -s tests -p "test_static_phase2.py" -v
           python -m unittest discover -s tests -p "test_middleware_phase2.py" -v
           python -m unittest discover -s tests -p "test_phase2_hardening.py" -v
       - name: Run Phase 3 backend lifecycle tests
+        shell: bash
         run: |
           python -m unittest discover -s tests -p "test_*phase3.py" -v
           python -m unittest discover -s tests -p "test_streaming_uploads.py" -v
