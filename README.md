@@ -68,6 +68,10 @@ Framework adapters are intentionally partial: React TSX syntax can be transforme
 
 Full React runtime integration, HMR, persistent compiler caching, CSS modules, general CSS import processing, production build optimization, code splitting, framework SSR, full standards-compliant proxy/host validation, CSRF protection, an integrated login/authorization system, database migrations/pooling, configuration loading from TOML, Cloudflare Tunnel management, route groups, and named tunnel lifecycle are not implemented. WebSockets do not support extensions/compression or application-level Origin policy; configure an allowlist in application code before exposing a WebSocket endpoint. Node.js and cloudflared are not used or downloaded by the core. `limbo dev --public` is not available.
 
+## Static delivery and middleware
+
+See [Static delivery and middleware](docs/STATIC_AND_MIDDLEWARE.md) for safe static mounts, response helpers, CORS, security headers, request IDs, access logs, rate limiting, gzip, and deployment limitations.
+
 ## Tests
 
 The test suite uses only the Python standard library:

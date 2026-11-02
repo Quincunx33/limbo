@@ -20,7 +20,7 @@ app.static(
 - `symlinks="deny"` rejects symbolic links. On platforms with directory-relative file opening, every component is opened with no-follow semantics; other platforms use a documented best-effort containment fallback.
 - `symlinks="within-root"` permits links only when their resolved target remains inside the configured root. It is a convenience policy, not a race-proof sandbox.
 - Files are streamed in bounded chunks. The open descriptor is the source of truth after path resolution.
-- Weak metadata ETags, Last-Modified, conditional GET, single byte ranges, If-Range, MIME and Cache-Control are emitted. Multiple ranges are deliberately unsupported and return 416.
+- Weak metadata ETags, Last-Modified, conditional GET, single byte ranges, If-Range, MIME and Cache-Control are emitted. Unsupported units, malformed syntax and multiple ranges are ignored; valid but unsatisfiable byte ranges return 416. End offsets beyond the file size are clamped.
 - HEAD returns representation headers without sending a body.
 
 ## Response helpers
