@@ -83,12 +83,47 @@ class Response:
     body: bytes | str | Iterable[bytes] = b""
     status: int = 200
     headers: dict[str, str] = field(default_factory=dict)
+    cookies: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         normalized = {str(k): str(v) for k, v in self.headers.items()}
         self.headers = normalized
         if isinstance(self.body, str):
             self.body = self.body.encode("utf-8")
+
+    def set_header(self, name: str, value: str) -> "Response":
+        token = "!#$%&'*+-.^\u0060|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        value = str(value)
+        if not name or any(char not in token for char in name):
+            raise ValueError("Invalid response header name")
+        if any(ord(char) < 0x20 and char != "\\t" or ord(char) == 0x7f for char in value):
+            raise ValueError("Invalid response header value")
+        existing = next((key for key in self.headers if key.lower() == name.lower()), None)
+        if existing is not None: del self.headers[existing]
+        self.headers[name] = value
+        return self
+
+    def set_cookie(self, name: str, value: str, *, max_age: int | None = None,
+                   expires: str | None = None, path: str = "/", domain: str | None = None,
+                   secure: bool = False, httponly: bool = True, samesite: str = "Lax") -> "Response":
+        from http.cookies import SimpleCookie, CookieError
+        jar = SimpleCookie()
+        try:
+            jar[name] = value
+            morsel = jar[name]
+            morsel["path"] = path
+            if domain is not None: morsel["domain"] = domain
+            if max_age is not None: morsel["max-age"] = str(max_age)
+            if expires is not None: morsel["expires"] = expires
+            if secure: morsel["secure"] = True
+            if httponly: morsel["httponly"] = True
+            if samesite not in {"Strict", "Lax", "None"}:
+                raise ValueError("SameSite must be Strict, Lax or None")
+            morsel["samesite"] = samesite
+        except (CookieError, TypeError) as exc:
+            raise ValueError("Invalid cookie") from exc
+        self.cookies.append(morsel.OutputString())
+        return self
 
     @classmethod
     def json(cls, value: Any, status: int = 200, headers: dict[str, str] | None = None) -> "Response":
