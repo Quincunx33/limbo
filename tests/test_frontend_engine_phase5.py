@@ -9,7 +9,7 @@ from limbo.cli import main as cli_main
 from contextlib import redirect_stdout
 from io import StringIO
 
-from limbo.frontend import DependencyGraph, ModuleResolver
+from limbo.frontend import DependencyGraph, FrontendError, ModuleResolver
 from limbo.frontend_scanner import scan_imports
 from limbo.css_scanner import scan_css_dependencies
 from limbo.frontend_cache import TransformCache
@@ -47,7 +47,7 @@ class FrontendAdapterContractTests(unittest.TestCase):
             root = Path(temp)
             (root / "main.js").write_text('import "./theme.css";', encoding="utf-8")
             (root / "theme.css").write_text('@import "package-theme.css";', encoding="utf-8")
-            with self.assertRaisesRegex(Exception, "Bare CSS dependency"):
+            with self.assertRaisesRegex(FrontendError, "Bare CSS dependency"):
                 DependencyGraph(ModuleResolver(root)).build("main.js")
 
     def test_dependency_graph_tracks_css_and_binary_asset_edges(self):
