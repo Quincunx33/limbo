@@ -240,6 +240,10 @@ class LimboServer:
             raw_length = headers.get("content-length", "0")
             if not re.fullmatch(r"[0-9]+", raw_length):
                 raise HTTPError(400, "Invalid Content-Length")
+            # Bound decimal conversion itself; huge digit strings are not useful
+            # for a bounded request body and can waste CPU during int parsing.
+            if len(raw_length) > len(str(self.max_body_bytes)):
+                raise HTTPError(413, "Request body too large")
             length = int(raw_length)
             if length > self.max_body_bytes:
                 raise HTTPError(413, "Request body too large")
