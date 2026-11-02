@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from limbo import UploadFile
+from limbo import Limbo, Request, UploadFile
 from limbo.uploads import parse_multipart
 
 

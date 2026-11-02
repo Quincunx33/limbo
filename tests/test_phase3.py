@@ -215,7 +215,13 @@ class WebSocketOriginPolicyTests(unittest.TestCase):
                     b"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
                     b"Sec-WebSocket-Version: 13\r\n\r\n"
                 )
-                response = client.recv(4096)
+                chunks = []
+                while True:
+                    part = client.recv(4096)
+                    if not part:
+                        break
+                    chunks.append(part)
+                response = b"".join(chunks)
                 self.assertIn(b"403 Forbidden", response)
                 self.assertNotIn(b"101 Switching Protocols", response)
         finally:
