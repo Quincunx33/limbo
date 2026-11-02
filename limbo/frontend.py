@@ -497,8 +497,13 @@ class FrontendDevServer:
                 module_path = (self.root / decoded_package_path).resolve(strict=True)
                 if not module_path.is_relative_to(self.root / "node_modules") or module_path not in self._allowed_modules:
                     return Response.text("Frontend module not found", 404)
-                content = self._rewrite_internal_imports(self._transform_cached(module_path), module_path)
-                return Response(content, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
+                if module_path.suffix.lower() in (".js", ".mjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte"):
+                    content = self._rewrite_internal_imports(self._transform_cached(module_path), module_path)
+                    return Response(content, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
+                if module_path.suffix.lower() in (".css", ".svg", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico",
+                                                    ".woff", ".woff2", ".ttf", ".wasm", ".mp3", ".mp4"):
+                    return Response(module_path.read_bytes(), 200, {"Content-Type": _mime(module_path), "Cache-Control": "no-store"})
+                return Response.text("Frontend package asset type is not supported", 404)
             decoded = unquote(relative)
             if any(part.startswith(".") or part == "node_modules" for part in Path(decoded).parts):
                 return Response.text("Frontend path is not publicly served", 404)
