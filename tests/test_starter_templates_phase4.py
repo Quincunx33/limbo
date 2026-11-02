@@ -19,7 +19,9 @@ class StarterTemplateTests(unittest.TestCase):
                 else:
                     source = (target / "app.py").read_text(encoding="utf-8")
                     compile(source, str(target / "app.py"), "exec")
-                    self.assertTrue((target / "frontend" / "src" / "main.js").is_file())
+                    main_js = target / "frontend" / "src" / "main.js"
+                    self.assertTrue(main_js.is_file())
+                    self.assertNotIn(r"\n", main_js.read_text(encoding="utf-8"))
                 if template == "vue":
                     self.assertTrue((target / "frontend" / "src" / "App.vue").is_file())
                     self.assertTrue((target / "package.json").is_file())

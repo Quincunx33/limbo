@@ -82,6 +82,25 @@ class FrontendResolverTests(unittest.TestCase):
         finally:
             outside.unlink(missing_ok=True)
 
+    def test_package_conditions_are_configurable_and_patterns_are_specific(self):
+        package = self.root / "node_modules" / "demo-package"
+        (package / "development.js").write_text("export const mode='development';", encoding="utf-8")
+        (package / "features" / "special.js").write_text("export const match='generic';", encoding="utf-8")
+        (package / "features" / "special" / "one.js").parent.mkdir(parents=True, exist_ok=True)
+        (package / "features" / "special" / "one.js").write_text("export const match='specific';", encoding="utf-8")
+        (package / "package.json").write_text(json.dumps({
+                "name": "demo-package",
+                "exports": {
+                    ".": {"development": "./development.js", "default": "./browser.js"},
+                "./features/*": "./features/generic/*.js",
+                "./features/special/*": "./features/special/*.js",
+            },
+        }), encoding="utf-8")
+        resolver = ModuleResolver(self.root, conditions=("development", "default"))
+        self.assertEqual(resolver.resolve("demo-package").path.name, "development.js")
+        self.assertEqual(resolver.resolve("demo-package/features/special/one").path.name, "one.js")
+        with self.assertRaises(ValueError): ModuleResolver(self.root, conditions=())
+
 
 class FrontendServingTests(unittest.TestCase):
     def test_generated_project_serves_frontend_entry(self):
@@ -159,8 +178,9 @@ class FrontendServingTests(unittest.TestCase):
     def test_dev_server_uses_content_addressed_transform_cache(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            (root / "main.js").write_text("export const value = 1;", encoding="utf-8")
+            (root / "main.js").write_text('export const value = 1;', encoding="utf-8")
             frontend = FrontendDevServer(root)
+            self.assertIsNotNone(frontend.registry.select(".js"))
             first = frontend.serve(Request("GET", "/__limbo/main.js", {}))
             second = frontend.serve(Request("GET", "/__limbo/main.js", {}))
             self.assertEqual(first.status, 200)

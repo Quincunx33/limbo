@@ -75,6 +75,13 @@ class BrowserNativeAdapter:
             code = source if source is not None else path.read_text(encoding="utf-8")
         except (OSError, UnicodeError) as exc:
             raise AdapterError(f"cannot read {path}: {exc}") from exc
+        if path.suffix.lower() in (".js", ".mjs"):
+            scan_source = re.sub(r"/\*[\s\S]*?\*/", "", code)
+            scan_source = re.sub(r"(?m)^\s*//.*$", "", scan_source)
+            if re.search(r"\bmodule\.exports\b|^\s*exports\.[A-Za-z_$][\w$]*\s*=|\brequire\s*\(", scan_source, re.MULTILINE):
+                raise AdapterError(
+                    f"CommonJS module {path.name} needs a bundler; direct browser-module serving is not supported yet"
+                )
         loader = "css" if path.suffix.lower() == ".css" else "js"
         return TransformResult(code=code, loader=loader)
 
@@ -115,7 +122,10 @@ class EsbuildAdapter:
         if loader is None:
             raise AdapterError(f"esbuild adapter does not handle {suffix or 'extensionless'} files")
         if not self.executable:
-            raise AdapterError("esbuild is not installed locally; install it in the project to enable this adapter")
+            raise AdapterError(
+                "esbuild is not installed locally; install it in the project with "
+                "`npm install --save-dev esbuild` to enable this adapter"
+            )
         if source is None:
             try:
                 source = path.read_text(encoding="utf-8")
@@ -220,6 +230,10 @@ class AdapterRegistry:
         for adapter_id in sorted(self._adapters):
             adapter = self._adapters[adapter_id]
             capability = asdict(adapter.capability)
+            # Keep the public manifest JSON-compatible even though the internal
+            # capability model uses tuples for immutable, deterministic data.
+            capability["extensions"] = list(capability["extensions"])
+            capability["requires"] = list(capability["requires"])
             capability["available"] = bool(adapter.detect())
             entries.append(capability)
         return {"schema_version": 1, "adapters": entries}

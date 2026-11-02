@@ -36,8 +36,8 @@ This is a useful foundation, not yet the target product. The README's explicit l
 7. Frontend dependency scanning is not a complete JavaScript parser. Literal ESM import support must not be confused with arbitrary dynamic import/CSS graph support.
 8. HMR, persistent compiler cache, production optimization, code splitting and source-map pipeline are missing.
 9. React runtime integration and framework SSR adapters are not complete. Vue/Svelte preview integrations remain experimental.
-10. CSRF, integrated auth policy, host validation, rate limiting and production security defaults need implementation and security tests.
-11. Background task scheduling/execution is not implemented.
+10. CSRF, authentication/authorization hooks, host validation and rate limiting are implemented; deployment-specific production security defaults still require review and security testing.
+11. Bounded in-process background task execution is implemented; durable scheduling and distributed workers are intentionally absent.
 12. Database support is SQLite-only; migrations, pooling and optional adapters are absent.
 
 ## Target module boundaries
@@ -87,10 +87,12 @@ Do not perform a large directory-only rewrite. Introduce compatibility re-export
 - Add local background task primitives with cancellation and shutdown semantics.
 
 ### Milestone 4 — Configuration and CLI
-- Implement typed `limbo.toml` parsing/validation.
-- Add `limbo add/remove` as explicit dependency metadata operations (never silent installation).
-- Add truthful `doctor`, `info`, and `dependencies` capability reporting.
-- Preserve no-config defaults.
+- [x] Implement typed `limbo.toml` parsing/validation.
+- [x] Add `limbo add/remove` as explicit dependency metadata operations (never silent installation).
+- [x] Add truthful `doctor`, `info`, and `dependencies` capability reporting.
+- [x] Preserve no-config defaults.
+
+Milestone 4 is engineering-complete. Focused configuration, CLI, metadata and starter-template tests pass; cross-platform CI and release packaging remain final release-gate work.
 
 ### Milestone 5 — Frontend development engine
 - Define a compiler adapter contract and capability model.

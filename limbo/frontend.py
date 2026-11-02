@@ -21,7 +21,13 @@ from .http import Request, Response
 from .frontend_scanner import scan_imports
 from .frontend_cache import TransformCache
 from .css_scanner import scan_css_dependencies
-from .frontend_engine import AdapterError, EsbuildAdapter
+from .frontend_engine import (
+    AdapterError,
+    AdapterRegistry,
+    BrowserNativeAdapter,
+    EsbuildAdapter,
+    FrameworkSFCAdapter,
+)
 
 
 EXTENSIONS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".json", ".css", ".svg", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico", ".woff", ".woff2", ".ttf", ".wasm", ".mp3", ".mp4")
@@ -47,10 +53,14 @@ class ResolvedModule:
 
 class ModuleResolver:
     """Resolve local, tsconfig-aliased, and package imports within a project."""
-    def __init__(self, project_root: str | os.PathLike[str], *, aliases: dict[str, list[str] | str] | None = None) -> None:
+    def __init__(self, project_root: str | os.PathLike[str], *, aliases: dict[str, list[str] | str] | None = None,
+                 conditions: tuple[str, ...] = ("browser", "import", "module", "default")) -> None:
         self.root = Path(project_root).expanduser().resolve(strict=True)
         if not self.root.is_dir():
             raise ValueError("Frontend project root must be a directory")
+        if not conditions or any(not isinstance(condition, str) or not condition for condition in conditions):
+            raise ValueError("Package resolution conditions must contain non-empty strings")
+        self.conditions = tuple(dict.fromkeys(conditions))
         self.base_url = self.root
         self.aliases = self._load_aliases(aliases)
 
@@ -244,7 +254,12 @@ class ModuleResolver:
         if subpath_map:
             if subpath in exports:
                 return self._conditional(exports[subpath])
-            for key, value in exports.items():
+            patterns = sorted(
+                ((key, value) for key, value in exports.items() if "*" in key),
+                key=lambda item: (len(item[0].replace("*", "")), item[0]),
+                reverse=True,
+            )
+            for key, value in patterns:
                 if "*" not in key: continue
                 before, after = key.split("*", 1)
                 if subpath.startswith(before) and subpath.endswith(after):
@@ -261,7 +276,7 @@ class ModuleResolver:
                 selected = self._conditional(item)
                 if selected: return selected
         if isinstance(value, dict):
-            for condition in ("browser", "import", "module", "default"):
+            for condition in self.conditions:
                 if condition in value:
                     selected = self._conditional(value[condition])
                     if selected: return selected
@@ -446,6 +461,12 @@ class FrontendDevServer:
         self.resolver = ModuleResolver(self.root)
         self.graph = DependencyGraph(self.resolver)
         self.compiler = FrontendCompiler(self.root)
+        self.registry = AdapterRegistry((
+            BrowserNativeAdapter(),
+            EsbuildAdapter(self.root, executable=self.compiler.esbuild),
+            FrameworkSFCAdapter(self.root, "vue"),
+            FrameworkSFCAdapter(self.root, "svelte"),
+        ))
         self.cache = TransformCache(self.root)
         self._allowed_modules: set[Path] = set()
 
@@ -484,7 +505,9 @@ class FrontendDevServer:
                 return Response(client, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
             if relative.startswith("_css/"):
                 css_relative = unquote(relative[len("_css/"):])
-                css_path = (self.root / css_relative).resolve(strict=True)
+                # A missing or malformed URL is a normal not-found response,
+                # not a frontend transform/configuration error.
+                css_path = (self.root / css_relative).resolve()
                 if css_path not in self._allowed_modules or css_path.suffix.lower() != ".css":
                     return Response.text("CSS module not found", 404)
                 css_url = self._module_url(css_path)
@@ -596,7 +619,16 @@ class FrontendDevServer:
         cached = self.cache.get(key)
         if cached is not None:
             return cached
-        transformed = self.compiler.transform(resolved)
+        adapter = self.registry.select(resolved.suffix)
+        if adapter is not None:
+            try:
+                transformed = adapter.transform(resolved).code
+            except AdapterError as exc:
+                raise FrontendError(str(exc)) from exc
+        else:
+            # JSON and future non-adapter assets retain the compiler's explicit
+            # fallback diagnostics rather than being silently passed through.
+            transformed = self.compiler.transform(resolved)
         self.cache.put(key, transformed)
         return transformed
 

@@ -27,9 +27,11 @@ extension and publishes a stable, versioned JSON capability manifest.
 | `svelte` | `.svelte` | Node.js and local `svelte` | Optional SFC bridge |
 
 No adapter invokes a package manager. Install optional tools in the frontend
-project yourself. The esbuild adapter is integrated into the active transform
-path for TypeScript/JSX-family files. Vue and Svelte adapters use the existing
-local SFC bridge. Their runtime compatibility remains experimental.
+project yourself. The live dev-server transform path selects browser-native,
+esbuild or Vue/Svelte adapters through the same registry used for capability
+detection. Vue and Svelte adapters use the existing local SFC bridge. Their
+runtime compatibility remains experimental; JSON keeps an explicit compiler
+fallback because it is not currently a registered adapter.
 
 ## Capability manifest
 
@@ -62,10 +64,13 @@ stylesheet link. Using a link preserves relative `url()` and nested CSS
 `@import` resolution. CSS imports with bindings/CSS modules are not supported.
 
 The resolver supports local paths, tsconfig path aliases, package `exports`
-subpaths/patterns and conditions, and package `imports` maps. It rejects
-Node.js built-ins and package paths that escape the project root. This is not a
-complete Node or bundler-compatible resolver; unsupported conditions and
-syntax must not be assumed to work.
+subpaths/patterns and conditions, and package `imports` maps. Export conditions
+are selected deterministically from the configured condition tuple (the default
+browser/import/module/default set can be overridden), and overlapping wildcard
+patterns prefer the more specific pattern. It rejects Node.js built-ins and
+package paths that escape the project root. This is not a complete Node or
+bundler-compatible resolver; unsupported conditions and syntax must not be
+assumed to work.
 
 ## Transform cache and development reload
 
