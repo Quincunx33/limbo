@@ -465,6 +465,17 @@ class FrontendDevServer:
                 entry = request.query_params.get("entry", [""])[0]
                 if not entry: return Response.json({"error": "Missing entry query parameter"}, 400)
                 return Response.json(self.import_map(entry), headers={"Cache-Control": "no-store"})
+            if relative.startswith("_css/"):
+                css_relative = unquote(relative[len("_css/"):])
+                css_path = (self.root / css_relative).resolve(strict=True)
+                if css_path not in self._allowed_modules or css_path.suffix.lower() != ".css":
+                    return Response.text("CSS module not found", 404)
+                css_url = self._module_url(css_path)
+                js = ("const response = await fetch(" + json.dumps(css_url) + ");\n"
+                      "if (!response.ok) throw new Error(`Limbo CSS load failed: ${response.status}`);\n"
+                      "const css = await response.text();\n"
+                      "const style = document.createElement('style'); style.textContent = css; document.head.appendChild(style);\n")
+                return Response(js, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
             if relative.startswith("_pkgfile/"):
                 decoded_package_path = unquote(relative[len("_pkgfile/"):])
                 module_path = (self.root / decoded_package_path).resolve(strict=True)
@@ -495,17 +506,28 @@ class FrontendDevServer:
             return Response.text(str(exc), 422)
 
     def _rewrite_internal_imports(self, code: str, importer: Path) -> str:
-        def mask(match): return "".join("\n" if char == "\n" else " " for char in match.group(0))
-        scan = re.sub(r"/\*[\s\S]*?\*/", mask, code)
-        scan = re.sub(r"(?m)^\s*//.*$", mask, scan)
+        try:
+            scan = scan_imports(code)
+        except ValueError as exc:
+            raise FrontendError(f"Cannot rewrite imports in {importer}: {exc}") from exc
         replacements = []
-        for match in IMPORT_RE.finditer(scan):
-            specifier = match.group(1)
-            if not specifier.startswith("#"):
+        for reference in scan.imports:
+            specifier = reference.specifier
+            if specifier.startswith("#"):
+                target = self.resolver.resolve(specifier, importer).path
+                replacement = self._module_url(target)
+            elif specifier.lower().endswith(".css"):
+                if reference.kind != "side-effect":
+                    raise FrontendError(
+                        f"CSS imports with bindings are not supported yet in {importer.name}; use a side-effect import"
+                    )
+                target = self.resolver.resolve(specifier, importer).path
+                self._allowed_modules.add(target)
+                relative = target.relative_to(self.root).as_posix()
+                replacement = self.prefix + "/_css/" + quote(relative, safe="/@._-")
+            else:
                 continue
-            target = self.resolver.resolve(specifier, importer).path
-            self._allowed_modules.add(target)
-            replacements.append((match.start(1), match.end(1), self._module_url(target)))
+            replacements.append((reference.start, reference.end, json.dumps(replacement)))
         for start, end, replacement in reversed(replacements):
             code = code[:start] + replacement + code[end:]
         return code
