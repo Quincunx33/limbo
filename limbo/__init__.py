@@ -4,6 +4,8 @@ from .router import RouteGroup, Router
 from .http import HTTPError, Request, Response
 from .database import Database
 from .frontend import DependencyGraph, FrontendCompiler, FrontendDevServer, FrontendError, ModuleResolver
+from .frontend_engine import (AdapterCapability, AdapterError, AdapterRegistry, BrowserNativeAdapter,
+                              CompilerAdapter, EsbuildAdapter, TransformResult)
 from .security import SessionSigner, hash_password, session_cookie, verify_password
 from .sessions import Session, SessionBackend, SessionStore, session_middleware
 from .csrf import csrf_protect
@@ -18,4 +20,5 @@ __all__ = ["Limbo", "Router", "RouteGroup", "Request", "Response", "HTTPError", 
            "Session", "SessionBackend", "SessionStore", "session_middleware", "csrf_protect", "BackgroundTasks", "authenticate", "authorize", "TemplateEngine", "UploadFile", "UploadLimitError", "DependencyGraph",
            "FrontendCompiler", "FrontendDevServer", "FrontendError", "ModuleResolver", "hash_password",
            "verify_password", "session_cookie", "cors", "gzip_compress", "security_headers", "request_id",
-           "access_log", "rate_limit", "__version__"]
+           "access_log", "rate_limit", "AdapterCapability", "AdapterError", "AdapterRegistry",
+           "BrowserNativeAdapter", "CompilerAdapter", "EsbuildAdapter", "TransformResult", "__version__"]
