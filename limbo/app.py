@@ -6,7 +6,7 @@ import mimetypes
 import os
 from pathlib import Path
 from typing import Callable
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 
 from .http import HTTPError, Request, Response
 from .frontend import FrontendDevServer
@@ -22,7 +22,7 @@ class Limbo:
         self.router = Router()
         self.middlewares: list[Callable] = []
         self.static_mounts: list[tuple[str, Path, str | None, str, str, str | None]] = []
-        self.websocket_routes: list[tuple[object, Callable]] = []
+        self.websocket_routes: list[tuple[object, Callable, tuple[str, ...] | None]] = []
         self.templates = TemplateEngine()
         self.frontend_servers: list[FrontendDevServer] = []
         self.max_body_bytes = max_body_bytes
@@ -82,14 +82,38 @@ class Limbo:
     def patch(self, path: str, **kwargs): return self.route(path, ("PATCH",), **kwargs)
     def delete(self, path: str, **kwargs): return self.route(path, ("DELETE",), **kwargs)
 
-    def websocket(self, path: str):
+    def websocket(self, path: str, *, origins: tuple[str, ...] | list[str] | None = None):
+        """Register a WebSocket route with an optional exact Origin allowlist."""
+        allowed_origins = None if origins is None else tuple(origins)
+        if allowed_origins is not None:
+            if not allowed_origins:
+                raise ValueError("WebSocket Origin allowlist cannot be empty")
+            for origin in allowed_origins:
+                try:
+                    parsed = urlsplit(origin)
+                    valid = (parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+                             and parsed.hostname is not None and parsed.username is None
+                             and parsed.password is None and not parsed.path
+                             and not parsed.query and not parsed.fragment
+                             and (parsed.port is None or 1 <= parsed.port <= 65535))
+                except (TypeError, ValueError):
+                    valid = False
+                if not valid:
+                    raise ValueError("WebSocket origins must be exact HTTP(S) origins")
         def decorate(handler):
             pattern = compile_path(path)
-            if any(existing.pattern == pattern.pattern for existing, _ in self.websocket_routes):
+            if any(existing.pattern == pattern.pattern for existing, _, _ in self.websocket_routes):
                 raise ValueError(f"Duplicate WebSocket route: {path}")
-            self.websocket_routes.append((pattern, handler))
+            self.websocket_routes.append((pattern, handler, allowed_origins))
             return handler
         return decorate
+
+    def websocket_origin_allowed(self, request: Request) -> bool:
+        """Check a matching WebSocket route's configured Origin policy."""
+        for pattern, _, origins in self.websocket_routes:
+            if pattern.fullmatch(request.path):
+                return origins is None or request.headers.get("origin") in origins
+        return True
 
     def render_template(self, template_name: str, **context) -> Response:
         return self.html(self.templates.render(template_name, context))
@@ -112,7 +136,7 @@ class Limbo:
         return frontend.script_tag(entry)
 
     def dispatch_websocket(self, request: Request, websocket) -> None:
-        for pattern, handler in self.websocket_routes:
+        for pattern, handler, _ in self.websocket_routes:
             match = pattern.fullmatch(request.path)
             if match:
                 request.path_params = match.groupdict()
@@ -464,7 +488,7 @@ class Limbo:
             self.background_tasks = BackgroundTasks()
         server = LimboServer(self.dispatch, host, port, request_timeout=request_timeout,
                              max_header_bytes=max_header_bytes, max_body_bytes=self.max_body_bytes,
-                             trusted_hosts=trusted_hosts, websocket_handler=self.dispatch_websocket if self.websocket_routes else None)
+                             trusted_hosts=trusted_hosts, websocket_handler=self.dispatch_websocket if self.websocket_routes else None,\n                             websocket_origin_check=self.websocket_origin_allowed)
         self._server = server
         try:
             for hook in self.startup_hooks:

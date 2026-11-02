@@ -21,7 +21,8 @@ class LimboServer:
                  max_body_bytes: int = 8 * 1024 * 1024, max_header_count: int = 100,
                  max_requests_per_connection: int = 100, backlog: int = 128,
                  trusted_hosts: tuple[str, ...] | list[str] | None = None,
-                 websocket_handler: Callable[[Request, WebSocket], None] | None = None) -> None:
+                 websocket_handler: Callable[[Request, WebSocket], None] | None = None,
+                 websocket_origin_check: Callable[[Request], bool] | None = None) -> None:
         self.app, self.host, self.port = app, host, port
         self.request_timeout, self.max_header_bytes = request_timeout, max_header_bytes
         if request_timeout <= 0 or max_header_bytes < 1024 or max_body_bytes < 0:
@@ -33,6 +34,7 @@ class LimboServer:
         self.max_requests_per_connection = max_requests_per_connection
         self.trusted_hosts = {item.lower() for item in trusted_hosts} if trusted_hosts is not None else None
         self.websocket_handler = websocket_handler
+        self.websocket_origin_check = websocket_origin_check
         self._socket: socket.socket | None = None
         self._stopping = threading.Event()
         self._threads: set[threading.Thread] = set()
@@ -151,6 +153,14 @@ class LimboServer:
         if request.method != "GET":
             self._write_response(conn, Response.text("WebSocket requires GET", 400), request.method, False)
             return
+        if self.websocket_origin_check is not None:
+            try:
+                origin_allowed = self.websocket_origin_check(request)
+            except Exception:
+                origin_allowed = False
+            if not origin_allowed:
+                self._write_response(conn, Response.text("WebSocket Origin rejected", 403), request.method, False)
+                return
         status, headers = (handshake_response(request.headers) if request.version == "HTTP/1.1" else (400, {}))
         if status == 101 and self.websocket_handler is None:
             status = 404

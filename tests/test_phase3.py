@@ -167,3 +167,44 @@ class ApplicationLifecycleTests(unittest.TestCase):
         app._server = fake
         app.shutdown()
         fake.shutdown.assert_called_once_with()
+
+
+class WebSocketOriginPolicyTests(unittest.TestCase):
+    def test_exact_origin_allowlist_and_invalid_configuration(self):
+        app = Limbo()
+        @app.websocket("/ws", origins=("https://app.example",))
+        def socket_handler(request, websocket):
+            pass
+        self.assertTrue(app.websocket_origin_allowed(Request("GET", "/ws", {"origin": "https://app.example"})))
+        self.assertFalse(app.websocket_origin_allowed(Request("GET", "/ws", {"origin": "https://evil.example"})))
+        self.assertFalse(app.websocket_origin_allowed(Request("GET", "/ws", {})))
+        with self.assertRaises(ValueError):
+            app.websocket("/bad", origins=("*",))
+
+    def test_origin_policy_rejects_before_websocket_upgrade(self):
+        app = Limbo()
+        @app.websocket("/ws", origins=("https://allowed.example",))
+        def socket_handler(request, websocket):
+            websocket.send("should not run")
+        server = LimboServer(app.dispatch, "127.0.0.1", 0,
+                             websocket_handler=app.dispatch_websocket,
+                             websocket_origin_check=app.websocket_origin_allowed)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        deadline = time.monotonic() + 2
+        while server.port == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        try:
+            with socket.create_connection(("127.0.0.1", server.port), timeout=2) as client:
+                client.sendall(
+                    b"GET /ws HTTP/1.1\\r\\nHost: localhost\\r\\nOrigin: https://evil.example\\r\\n"
+                    b"Upgrade: websocket\\r\\nConnection: Upgrade\\r\\n"
+                    b"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\\r\\n"
+                    b"Sec-WebSocket-Version: 13\\r\\n\\r\\n"
+                )
+                response = client.recv(4096)
+                self.assertIn(b"403 Forbidden", response)
+                self.assertNotIn(b"101 Switching Protocols", response)
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
