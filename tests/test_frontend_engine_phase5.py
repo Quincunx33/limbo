@@ -1,6 +1,8 @@
 import json
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 from pathlib import Path
 
 from limbo.cli import main as cli_main
@@ -76,6 +78,19 @@ const meta = import.meta.url;
             path.write_text("<template/>", encoding="utf-8")
             with self.assertRaises(AdapterError):
                 adapter.transform(path)
+
+    def test_esbuild_adapter_uses_project_source_as_stdin(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            path = root / "entry.ts"
+            path.write_text("const value: number = 1;", encoding="utf-8")
+            adapter = EsbuildAdapter(root, executable="esbuild")
+            completed = SimpleNamespace(returncode=0, stdout="const value = 1;", stderr="")
+            with patch("limbo.frontend_engine.subprocess.run", return_value=completed) as run:
+                result = adapter.transform(path)
+            self.assertEqual(result.code, "const value = 1;")
+            self.assertEqual(run.call_args.kwargs["input"], "const value: number = 1;")
+            self.assertIn("--loader=ts", run.call_args.args[0])
 
     def test_registry_manifest_is_stable_json_and_selects_by_extension(self):
         registry = AdapterRegistry((BrowserNativeAdapter(),))
