@@ -152,7 +152,7 @@ class LimboServer:
         line = stream.readline(limit + 1)
         if len(line) > limit:
             raise HTTPError(status, "HTTP line exceeds configured limit")
-        if line and not line.endswith(b"\\r\\n"):
+        if line and not line.endswith(b"\r\n"):
             raise HTTPError(400, "HTTP lines must end with CRLF")
         return line
 
@@ -198,22 +198,22 @@ class LimboServer:
             total += len(header)
             if total > self.max_header_bytes:
                 raise HTTPError(431, "Request headers too large")
-            if header == b"\\r\\n":
+            if header == b"\r\n":
                 break
             count += 1
             if count > self.max_header_count:
                 raise HTTPError(431, "Too many request headers")
-            if header[:1] in (b" ", b"\\t") or b":" not in header:
+            if header[:1] in (b" ", b"\t") or b":" not in header:
                 raise HTTPError(400, "Malformed header")
             key, value = header[:-2].split(b":", 1)
             try:
                 key_text = key.decode("ascii").lower()
-                value_text = value.decode("latin-1").strip(" \\t")
+                value_text = value.decode("latin-1").strip(" \t")
             except UnicodeDecodeError:
                 raise HTTPError(400, "Malformed header")
             if not key_text or any(c not in "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyz" for c in key_text):
                 raise HTTPError(400, "Invalid header name")
-            if any(ord(ch) < 0x20 and ch != "\\t" or ord(ch) == 0x7f for ch in value_text):
+            if any(ord(ch) < 0x20 and ch != "\t" or ord(ch) == 0x7f for ch in value_text):
                 raise HTTPError(400, "Invalid header value")
             if key_text in headers:
                 # Reject all duplicates for framing/routing-sensitive fields.
@@ -275,27 +275,27 @@ class LimboServer:
                     trailer_bytes += len(trailer)
                     if trailer_bytes > self.max_header_bytes:
                         raise HTTPError(431, "Trailers too large")
-                    if trailer == b"\\r\\n":
+                    if trailer == b"\r\n":
                         return b"".join(chunks)
                     trailer_count += 1
                     if trailer_count > self.max_header_count:
                         raise HTTPError(431, "Too many trailer fields")
-                    if trailer[:1] in (b" ", b"\\t") or b":" not in trailer:
+                    if trailer[:1] in (b" ", b"\t") or b":" not in trailer:
                         raise HTTPError(400, "Malformed trailer")
                     name, value = trailer[:-2].split(b":", 1)
                     try:
                         name_text = name.decode("ascii").lower()
-                        value_text = value.decode("latin-1").strip(" \\t")
+                        value_text = value.decode("latin-1").strip(" \t")
                     except UnicodeDecodeError:
                         raise HTTPError(400, "Malformed trailer")
                     if not name_text or any(ch not in "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyz" for ch in name_text):
                         raise HTTPError(400, "Invalid trailer name")
                     if name_text in forbidden_trailers:
                         raise HTTPError(400, "Forbidden framing trailer")
-                    if any(ord(ch) < 0x20 and ch != "\\t" or ord(ch) == 0x7f for ch in value_text):
+                    if any(ord(ch) < 0x20 and ch != "\t" or ord(ch) == 0x7f for ch in value_text):
                         raise HTTPError(400, "Invalid trailer value")
             data = stream.read(size + 2)
-            if len(data) != size + 2 or data[-2:] != b"\\r\\n":
+            if len(data) != size + 2 or data[-2:] != b"\r\n":
                 raise HTTPError(400, "Malformed chunk")
             chunks.append(data[:-2])
             size_total += size
