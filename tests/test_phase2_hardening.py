@@ -28,9 +28,11 @@ class StaticAdversarialTests(unittest.TestCase):
             self.assertEqual(self.get(path).status, 404)
 
     def test_unsatisfiable_range_returns_416(self):
-        response = self.get(headers={"range": "bytes=10-"})
-        self.assertEqual(response.status, 416)
-        self.assertEqual(response.headers["Content-Range"], "bytes */10")
+        for value in ("bytes=10-", "bytes=4-2", "bytes=-0"):
+            with self.subTest(range=value):
+                response = self.get(headers={"range": value})
+                self.assertEqual(response.status, 416)
+                self.assertEqual(response.headers["Content-Range"], "bytes */10")
 
     def test_malformed_unsupported_and_multiple_ranges_are_ignored(self):
         for value in ("bytes=0-1,4-5", "bytes=abc-def", "bytes=-", "items=0-1"):

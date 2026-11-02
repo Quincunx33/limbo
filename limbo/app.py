@@ -377,22 +377,33 @@ class Limbo:
 
         start, end, status = 0, size - 1, 200
         if range_header:
-            try:
-                if not range_header.startswith("bytes=") or "," in range_header: raise ValueError
-                first, last = range_header[6:].split("-", 1)
-                if not first:
-                    suffix = int(last)
-                    if suffix <= 0 or size == 0: raise ValueError
-                    start, end = max(0, size - suffix), size - 1
-                else:
-                    start, end = int(first), int(last) if last else size - 1
-                    if start < 0 or end < start or start >= size: raise ValueError
-                    end = min(end, size - 1)
-                status = 206
+            # Ignore unsupported units, malformed syntax and multi-range requests.
+            # Return 416 only for a valid byte range that cannot be satisfied.
+            match = __import__("re").fullmatch(r"bytes=(\\d*)-(\\d*)", range_header.strip())
+            if match:
+                first, last = match.groups()
+                if first or last:
+                    try:
+                        if not first:
+                            suffix = int(last)
+                            if suffix <= 0 or size == 0:
+                                raise IndexError
+                            start, end, status = max(0, size - suffix), size - 1, 206
+                        else:
+                            start = int(first)
+                            end = int(last) if last else size - 1
+                            if start >= size or end < start or size == 0:
+                                raise IndexError
+                            end = min(end, size - 1)
+                            status = 206
+                    except IndexError:
+                        close_fd()
+                        return Response(b"", 416, {**headers, "Content-Range": f"bytes */{size}"})
+                    except (ValueError, OverflowError):
+                        # Reject pathological integer fields by ignoring Range.
+                        start, end, status = 0, size - 1, 200
+            if status == 206:
                 headers["Content-Range"] = f"bytes {start}-{end}/{size}"
-            except (ValueError, OverflowError):
-                close_fd()
-                return Response(b"", 416, {**headers, "Content-Range": f"bytes */{size}"})
 
         length = max(0, end - start + 1)
         headers["Content-Length"] = str(length)
