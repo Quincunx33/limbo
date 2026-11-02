@@ -17,7 +17,7 @@ def _origin_is_valid(origin: str) -> bool:
     try:
         parsed = urlsplit(origin)
         return (parsed.scheme in {"http", "https"} and bool(parsed.netloc)
-                and parsed.hostname is not None and parsed.username is None
+                and parsed.hostname is not None and parsed.username is None and (parsed.port is None or 1 <= parsed.port <= 65535)
                 and parsed.password is None and not parsed.path and not parsed.query
                 and not parsed.fragment)
     except ValueError:
@@ -45,7 +45,7 @@ def cors(*, allow_origins: tuple[str, ...] | list[str] = ("*",),
     if not methods or any(not re.fullmatch(r"[A-Z][A-Z0-9-]*", method) for method in methods):
         raise ValueError("Invalid CORS method")
     token = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
-    if any(not token.fullmatch(name) for name in (*headers, *exposed)):
+    if any(name != "*" and not token.fullmatch(name) for name in (*headers, *exposed)):
         raise ValueError("Invalid CORS header name")
     if max_age is not None and max_age < 0:
         raise ValueError("CORS max_age cannot be negative")
