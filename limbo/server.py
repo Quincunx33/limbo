@@ -15,6 +15,71 @@ from .http import HTTPError, Request, Response
 from .websocket import WebSocket, handshake_response
 
 
+class _FixedBodyReader:
+    def __init__(self, server, stream, deadline, length):
+        self.server, self.stream, self.deadline, self.remaining = server, stream, deadline, length
+
+    def read(self, size=-1):
+        if self.remaining <= 0:
+            return b""
+        amount = self.remaining if size is None or size < 0 else min(size, self.remaining)
+        self.server._remaining(self.stream, self.deadline)
+        data = self.stream.read(amount)
+        self.remaining -= len(data)
+        if not data and self.remaining:
+            raise HTTPError(400, "Incomplete request body")
+        return data
+
+
+class _ChunkedBodyReader:
+    def __init__(self, server, stream, deadline, maximum):
+        self.server, self.stream, self.deadline, self.maximum = server, stream, deadline, maximum
+        self.remaining = 0
+        self.total = 0
+        self.finished = False
+
+    def read(self, size=-1):
+        if self.finished:
+            return b""
+        wanted = 64 * 1024 if size is None or size < 0 else size
+        output = bytearray()
+        while len(output) < wanted and not self.finished:
+            if self.remaining == 0:
+                line = self.server._readline(self.stream, 1024, status=400, deadline=self.deadline)
+                if not line:
+                    raise HTTPError(400, "Incomplete chunked body")
+                token = line[:-2].split(b";", 1)[0]
+                if not token or not re.fullmatch(rb"[0-9A-Fa-f]+", token):
+                    raise HTTPError(400, "Invalid chunk size")
+                amount = int(token, 16)
+                if self.total + amount > self.maximum:
+                    raise HTTPError(413, "Request body too large")
+                if amount == 0:
+                    while True:
+                        trailer = self.server._readline(self.stream, 8192, status=431, deadline=self.deadline)
+                        if not trailer:
+                            raise HTTPError(400, "Incomplete chunked trailers")
+                        if trailer == b"\\r\\n":
+                            self.finished = True
+                            break
+                        if b":" not in trailer or trailer[:1] in (b" ", b"\\t"):
+                            raise HTTPError(400, "Malformed trailer")
+                    continue
+                self.remaining = amount
+            take = min(wanted - len(output), self.remaining)
+            self.server._remaining(self.stream, self.deadline)
+            data = self.stream.read(take)
+            if len(data) != take:
+                raise HTTPError(400, "Incomplete chunked body")
+            output.extend(data)
+            self.remaining -= take
+            self.total += take
+            if self.remaining == 0:
+                if self.stream.read(2) != b"\\r\\n":
+                    raise HTTPError(400, "Malformed chunk")
+        return bytes(output)
+
+
 class LimboServer:
     def __init__(self, app: Callable[[Request], Response], host: str = "127.0.0.1", port: int = 8000,
                  *, request_timeout: float = 15.0, max_header_bytes: int = 32_768,
@@ -23,7 +88,7 @@ class LimboServer:
                  trusted_hosts: tuple[str, ...] | list[str] | None = None,
                  websocket_handler: Callable[[Request, WebSocket], None] | None = None,
                  websocket_origin_check: Callable[[Request], bool] | None = None,
-                 websocket_options: Callable[[Request], dict[str, object]] | None = None) -> None:
+                 websocket_options: Callable[[Request], dict[str, object]] | None = None,\n                 upload_limits: dict[str, int] | None = None) -> None:
         self.app, self.host, self.port = app, host, port
         self.request_timeout, self.max_header_bytes = request_timeout, max_header_bytes
         if request_timeout <= 0 or max_header_bytes < 1024 or max_body_bytes < 0:
@@ -308,25 +373,46 @@ class LimboServer:
         transfer_encoding = headers.get("transfer-encoding", "").strip().lower()
         if transfer_encoding and transfer_encoding != "chunked":
             raise HTTPError(501, "Transfer encoding not supported")
-        if transfer_encoding == "chunked":
-            body = self._read_chunked(stream, deadline=deadline)
-        else:
-            raw_length = headers.get("content-length", "0")
+        raw_length = headers.get("content-length", "0")
+        if transfer_encoding != "chunked":
             if not re.fullmatch(r"[0-9]+", raw_length):
                 raise HTTPError(400, "Invalid Content-Length")
-            # Bound decimal conversion itself; huge digit strings are not useful
-            # for a bounded request body and can waste CPU during int parsing.
             if len(raw_length) > len(str(self.max_body_bytes)):
                 raise HTTPError(413, "Request body too large")
             length = int(raw_length)
             if length > self.max_body_bytes:
                 raise HTTPError(413, "Request body too large")
-            self._remaining(stream, deadline)
-            body = stream.read(length)
-            if len(body) != length:
-                raise HTTPError(400, "Incomplete request body")
-
-        request = Request(method.upper(), target, headers, body, (address[0], address[1]))
+        is_multipart = headers.get("content-type", "").lower().startswith("multipart/form-data")
+        if is_multipart:
+            from .uploads import UploadLimitError, parse_multipart_stream
+            if transfer_encoding == "chunked":
+                source = _ChunkedBodyReader(self, stream, deadline, self.max_body_bytes)
+            else:
+                source = _FixedBodyReader(self, stream, deadline, int(raw_length))
+            try:
+                parsed, tempdir = parse_multipart_stream(
+                    headers["content-type"], source,
+                    max_body_bytes=self.upload_limits["max_body_bytes"],
+                    max_files=self.upload_limits["max_files"],
+                    max_fields=self.upload_limits["max_fields"],
+                    max_file_bytes=self.upload_limits["max_file_bytes"],
+                )
+            except UploadLimitError as exc:
+                raise HTTPError(413, str(exc)) from exc
+            except (ValueError, UnicodeError) as exc:
+                raise HTTPError(400, "Malformed multipart body") from exc
+            request = Request(method.upper(), target, headers, b"", (address[0], address[1]))
+            request._multipart_cache = parsed
+            request._upload_tempdir = tempdir
+        else:
+            if transfer_encoding == "chunked":
+                body = self._read_chunked(stream, deadline=deadline)
+            else:
+                self._remaining(stream, deadline)
+                body = stream.read(int(raw_length))
+                if len(body) != int(raw_length):
+                    raise HTTPError(400, "Incomplete request body")
+            request = Request(method.upper(), target, headers, body, (address[0], address[1]))
         request.version = version
         return request
 
