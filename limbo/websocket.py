@@ -41,6 +41,8 @@ def _read_exact(sock: Any, count: int) -> bytes:
 class WebSocket:
     def __init__(self, sock: socket.socket, *, reader: Any | None = None,
                  max_message_bytes: int = 8 * 1024 * 1024) -> None:
+        if not isinstance(max_message_bytes, int) or max_message_bytes < 1:
+            raise ValueError("max_message_bytes must be a positive integer")
         self.socket = sock
         self.reader = reader or sock
         self.max_message_bytes = max_message_bytes
@@ -66,7 +68,11 @@ class WebSocket:
         fragments = bytearray()
         message_opcode: int | None = None
         while not self.closed:
-            first, second = _read_exact(self.reader, 2)
+            try:
+                first, second = _read_exact(self.reader, 2)
+            except (socket.timeout, TimeoutError):
+                self.close(1001, "Idle timeout")
+                return None
             fin, rsv, opcode, masked = bool(first & 0x80), first & 0x70, first & 0x0F, bool(second & 0x80)
             if rsv or not masked:
                 self.close(1002, "Protocol error"); return None
