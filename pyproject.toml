@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "limbo-framework"
+version = "0.2.0"
+description = "A Python-first, zero-dependency web framework foundation"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Limbo contributors"}]
+classifiers = ["Programming Language :: Python :: 3", "Topic :: Internet :: WWW/HTTP :: WSGI :: Application"]
+dependencies = []
+
+[project.scripts]
+limbo = "limbo.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["limbo*"]
