@@ -148,7 +148,7 @@ def session_middleware(store: SessionBackend | None = None, *, cookie_name: str 
 
     def middleware(request: Request, next_handler: Callable) -> Response:
         supplied = request.cookies.get(cookie_name)
-        valid_cookie = backend.valid_id(supplied)
+        valid_cookie = SessionStore.valid_id(supplied)
         loaded = backend.load(supplied) if valid_cookie else None
         session = Session(loaded, supplied if loaded is not None else None)
         request.session = session
