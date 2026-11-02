@@ -92,6 +92,18 @@ class SessionMiddlewareTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             store.save("../bad", {})
 
+
+    def test_nested_mutations_are_detected_and_copied(self):
+        store = SessionStore()
+        session_id = "C" * 43
+        store.save(session_id, {"profile": {"name": "before"}})
+        loaded = store.load(session_id)
+        session = __import__("limbo.sessions", fromlist=["Session"]).Session(loaded, session_id)
+        loaded["profile"]["name"] = "outside"
+        self.assertEqual(store.load(session_id)["profile"]["name"], "before")
+        session["profile"]["name"] = "after"
+        self.assertTrue(session.modified)
+
     def test_configuration_validation_and_samesite_none_requires_secure(self):
         with self.assertRaises(ValueError):
             session_middleware(cookie_name="bad;name")

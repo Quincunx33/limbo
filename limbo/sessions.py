@@ -1,6 +1,7 @@
 """Bounded, process-local server-side sessions and cookie middleware."""
 from __future__ import annotations
 
+import copy
 import re
 import secrets
 import threading
@@ -48,7 +49,7 @@ class SessionStore:
                 del self._items[session_id]
                 return None
             self._items.move_to_end(session_id)
-            return dict(data)
+            return copy.deepcopy(data)
 
     def save(self, session_id: str, data: dict[str, Any]) -> None:
         if not self.valid_id(session_id):
@@ -58,7 +59,7 @@ class SessionStore:
         now = time.monotonic()
         with self._lock:
             self._purge_expired(now)
-            self._items[session_id] = (dict(data), now + self.max_age)
+            self._items[session_id] = (copy.deepcopy(data), now + self.max_age)
             self._items.move_to_end(session_id)
             while len(self._items) > self.max_sessions:
                 self._items.popitem(last=False)
@@ -78,9 +79,9 @@ class SessionStore:
 class Session(MutableMapping[str, Any]):
     """Mutable request session with explicit ID rotation and destruction."""
     def __init__(self, data: dict[str, Any] | None = None, session_id: str | None = None) -> None:
-        self._data = dict(data or {})
+        self._data = copy.deepcopy(data or {})
         self.session_id = session_id
-        self._original = dict(self._data)
+        self._original = copy.deepcopy(self._data)
         self._rotate = False
         self._destroy = False
 
@@ -121,8 +122,6 @@ def session_middleware(store: SessionStore | None = None, *, cookie_name: str = 
     Call request.session.regenerate() after login/privilege changes and
     request.session.destroy() when logging out.
     """
-    from http.cookies import SimpleCookie, CookieError
-
     if not isinstance(cookie_name, str) or not cookie_name or any(ch in cookie_name for ch in "\r\n;="):
         raise ValueError("Invalid session cookie name")
     if same_site not in {"Strict", "Lax", "None"}:
