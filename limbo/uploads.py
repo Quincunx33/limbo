@@ -115,6 +115,22 @@ def _safe_name(name: str) -> str:
     return name[:180]
 
 
+class _LimitedSource:
+    def __init__(self, source, maximum: int) -> None:
+        self.source = source
+        self.maximum = maximum
+        self.total = 0
+
+    def read(self, size=-1):
+        if size is None or size < 0:
+            size = 64 * 1024
+        data = self.source.read(min(size, self.maximum - self.total + 1))
+        self.total += len(data)
+        if self.total > self.maximum:
+            raise UploadLimitError("Multipart body exceeds the configured limit")
+        return data
+
+
 class _StreamBuffer:
     def __init__(self, source, chunk_size: int = 64 * 1024) -> None:
         self.source = source
@@ -214,6 +230,7 @@ def parse_multipart_stream(content_type: str, source, *, max_body_bytes: int = 8
     if not boundary or len(boundary.encode("ascii", "ignore")) > 200:
         raise ValueError("Invalid multipart boundary")
     marker = boundary.encode("ascii")
+    source = _LimitedSource(source, max_body_bytes)
     reader = _StreamBuffer(source, chunk_size)
     tempdir = tempfile.TemporaryDirectory(prefix="limbo-upload-")
     result: dict[str, list[str | UploadFile]] = {}
@@ -269,7 +286,7 @@ def parse_multipart_stream(content_type: str, source, *, max_body_bytes: int = 8
                     raise ValueError("Invalid multipart text field encoding") from exc
                 result.setdefault(field_name, []).append(value)
             if final_part:
-                if reader.buffer:
+                if reader.buffer or source.read(1):
                     raise ValueError("Unexpected data after multipart closing boundary")
                 return result, tempdir
     except Exception:
