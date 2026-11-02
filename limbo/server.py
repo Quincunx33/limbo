@@ -95,7 +95,10 @@ class LimboServer:
                     response = Response.text(exc.message, exc.status)
                 except Exception:
                     response = Response.text("Internal Server Error", 500)
-                self._write_response(conn, response, request.method, keep_alive)
+                try:
+                    self._write_response(conn, response, request.method, keep_alive)
+                except (OSError, TypeError, ValueError):
+                    break
                 if not keep_alive:
                     break
         finally:
@@ -238,26 +241,38 @@ class LimboServer:
         headers.setdefault("server", "Limbo/0.1")
         headers.setdefault("connection", "keep-alive" if keep_alive else "close")
         stream_body = not isinstance(response.body, bytes)
-        chunked = stream_body and "content-length" not in headers and status not in (204, 304) and not 100 <= status < 200
+        no_body = method == "HEAD" or status in (204, 205, 304) or 100 <= status < 200
+        if status in (204, 304) or 100 <= status < 200:
+            headers.pop("content-length", None)
+            headers.pop("transfer-encoding", None)
+        elif status == 205:
+            headers.pop("transfer-encoding", None)
+            headers["content-length"] = "0"
+        chunked = stream_body and not no_body and "content-length" not in headers
         if chunked:
             headers.setdefault("transfer-encoding", "chunked")
-        elif not stream_body and status not in (204, 304) and not 100 <= status < 200:
-            headers.setdefault("content-length", str(len(response.body)))
+        elif not stream_body and status not in (204, 205, 304) and not 100 <= status < 200:
+            headers["content-length"] = str(len(response.body))
         for key, value in headers.items():
             if not key or any(ch in key for ch in "\r\n:") or any(ch in value for ch in "\r\n"):
                 raise ValueError("Invalid response header")
         head = f"HTTP/1.1 {status} {phrase}\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers.items()) + "\r\n"
         conn.sendall(head.encode("latin-1", "replace"))
-        if method == "HEAD" or status in (204, 304) or 100 <= status < 200:
+        if no_body:
             return
         if not stream_body:
             if response.body:
                 conn.sendall(response.body)
             return
+        sent = 0
+        expected = int(headers["content-length"]) if stream_body and "content-length" in headers else None
         for chunk in response.body:
             if not isinstance(chunk, bytes):
                 raise TypeError("Streaming response chunks must be bytes")
             if chunk:
+                sent += len(chunk)
                 conn.sendall((f"{len(chunk):X}\r\n".encode("ascii") + chunk + b"\r\n") if chunked else chunk)
+        if expected is not None and sent != expected:
+            raise ValueError("Streaming response length does not match Content-Length")
         if chunked:
             conn.sendall(b"0\r\n\r\n")

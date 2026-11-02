@@ -106,6 +106,16 @@ class SocketServerTests(unittest.TestCase):
             empty = right.recv(4096)
             self.assertIn(b"204 No Content", empty)
             self.assertNotIn(b"content-length", empty.lower())
+            left.close(); right.close()
+            left, right = socket.socketpair()
+            self.server._write_response(left, Response(b"", 304, {"Content-Length": "999"}), "GET", False)
+            not_modified = right.recv(4096).lower()
+            self.assertNotIn(b"content-length", not_modified)
+            left.close(); right.close()
+            left, right = socket.socketpair()
+            self.server._write_response(left, Response(iter([b"stream"])), "HEAD", False)
+            streamed_head = right.recv(4096).lower()
+            self.assertNotIn(b"transfer-encoding", streamed_head)
         finally:
             left.close(); right.close()
 
