@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import shutil
 import subprocess
 import sys
@@ -85,6 +86,28 @@ def _tool_status(executable: str, version_args: tuple[str, ...]) -> str:
         return f"{path} (version unavailable)"
 
 
+def _frontend_tool_report() -> list[str]:
+    try:
+        capabilities = FrontendCompiler(".").doctor()
+    except (OSError, ValueError) as exc:
+        return [f"Frontend tools: unavailable ({exc})"]
+    report = []
+    for name, location in capabilities.items():
+        if not location:
+            report.append(f"{name}: not found (optional)")
+            continue
+        if name in {"node", "esbuild"}:
+            report.append(f"{name}: {_tool_status(location, ('--version',))}")
+            continue
+        manifest = Path(location) / "package.json"
+        try:
+            version = json.loads(manifest.read_text(encoding="utf-8")).get("version")
+        except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
+            version = None
+        report.append(f"{name}: {location}" + (f" (v{version})" if version else " (version unavailable)"))
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="limbo", description="Python-first, zero-dependency web framework")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -163,6 +186,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         status = "loaded " + str(config.path) if config.path else "defaults (no limbo.toml)"
         print(f"Python: {sys.version.split()[0]}\nConfiguration: {status}\ncloudflared: {_tool_status('cloudflared', ('--version',))}\nNode.js: {_tool_status('node', ('--version',))}")
+        for line in _frontend_tool_report(): print(line)
         return 0
     if args.command == "build":
         print("Production frontend builds are not implemented in Limbo 0.3.0; no build was run.", file=sys.stderr)
