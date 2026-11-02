@@ -15,20 +15,43 @@ from .config import ConfigError, load_config
 from .project import ProjectMetadataError, edit_package_metadata, preview_directory
 
 
-def _create(name: str) -> int:
+def _create(name: str, template: str = "python-api") -> int:
     target = Path(name).expanduser()
+    if template not in {"python-api", "static", "browser-native", "vue"}:
+        print(f"Error: unknown template {template!r}.", file=sys.stderr)
+        return 2
     if target.exists() and any(target.iterdir()):
         print(f"Error: {target} already exists and is not empty.", file=sys.stderr)
         return 2
     target.mkdir(parents=True, exist_ok=True)
     for folder in ("static", "templates", "uploads", "tests", "frontend/src", "frontend/public"):
         (target / folder).mkdir(parents=True, exist_ok=True)
-    (target / "frontend" / "src" / "main.js").write_text('''const root = document.querySelector("#app");\nroot.textContent = "Frontend modules are served locally by Limbo.";\n''', encoding="utf-8")
-    (target / "app.py").write_text('''from limbo import Limbo\n\napp = Limbo(name="My Limbo app")\napp.enable_frontend("frontend")\n\n@app.get("/")\ndef home(req):\n    tags = app.frontend_script("src/main.js")\n    return app.html("<!doctype html><html><head><meta charset='utf-8'><title>Limbo</title></head>"\n                    "<body><h1>Hello from Limbo</h1><div id='app'>Loading…</div>" + tags + "</body></html>")\n\n@app.get("/api/health")\ndef health(req):\n    return {"ok": True}\n\napp.static("/static", "static")\n\nif __name__ == "__main__":\n    app.run()\n''', encoding="utf-8")
     (target / "limbo.toml").write_text('[app]\nname = "My Limbo app"\ndebug = true\n\n[server]\nhost = "127.0.0.1"\nport = 8000\n', encoding="utf-8")
     (target / "requirements.txt").write_text("# Limbo core has no third-party dependencies.\n", encoding="utf-8")
-    (target / "README.md").write_text(f"# {target.name}\n\nRun `python app.py` from this directory.\n", encoding="utf-8")
-    print(f"Created {target}. Run `cd {target} && python app.py`.")
+    if template == "static":
+        (target / "dist").mkdir(exist_ok=True)
+        (target / "dist" / "index.html").write_text('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Limbo static site</title><body><main><h1>Hello from Limbo</h1><p>Your static site is ready.</p></main></body></html>\n', encoding="utf-8")
+        readme = "Run limbo preview to serve the included dist/ directory. Edit dist/index.html to customize the site.\n"
+    else:
+        (target / "frontend" / "src" / "main.js").write_text('const root = document.querySelector("#app");\nroot.textContent = "Frontend modules are served locally by Limbo.";\n', encoding="utf-8")
+        if template == "vue":
+            (target / "frontend" / "src" / "App.vue").write_text('<script setup>\nimport { ref } from "vue";\nconst count = ref(0);\n</script>\n<template><main><h1>Limbo + Vue</h1><button @click="count++">Count: {{ count }}</button></main></template>\n', encoding="utf-8")
+            (target / "package.json").write_text('{\n  "name": "limbo-vue-starter",\n  "private": true,\n  "dependencies": {\n    "vue": "*"\n  },\n  "devDependencies": {\n    "@vue/compiler-sfc": "*"\n  }\n}\n', encoding="utf-8")
+            readme = "Install the declared frontend packages with your preferred package manager, then run python app.py. Limbo never installs packages automatically.\n"
+        else:
+            readme = "Run python app.py from this directory. The browser-native frontend has no Node.js requirement.\n"
+        app_source = (
+            "from limbo import Limbo\n\napp = Limbo(name=\"My Limbo app\")\napp.enable_frontend(\"frontend\")\n\n"
+            "@app.get(\"/\")\ndef home(req):\n"
+            "    tags = app.frontend_script(\"src/main.js\")\n"
+            "    return app.html(\"<!doctype html><html><head><meta charset='utf-8'><title>Limbo</title></head>\"\n"
+            "                    \"<body><h1>Hello from Limbo</h1><div id='app'>Loading…</div>\" + tags + \"</body></html>\")\n\n"
+            "@app.get(\"/api/health\")\ndef health(req):\n    return {\"ok\": True}\n\n"
+            "app.static(\"/static\", \"static\")\n\nif __name__ == \"__main__\":\n    app.run()\n"
+        )
+        (target / "app.py").write_text(app_source, encoding="utf-8")
+    (target / "README.md").write_text(f"# {target.name}\n\nTemplate: {template}\n\n{readme}", encoding="utf-8")
+    print(f"Created {target} using the {template} template.")
     return 0
 
 
@@ -51,7 +74,7 @@ def _load_app() -> object:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="limbo", description="Python-first, zero-dependency web framework")
     sub = parser.add_subparsers(dest="command", required=True)
-    create = sub.add_parser("create", help="create a starter project"); create.add_argument("name")
+    create = sub.add_parser("create", help="create a starter project"); create.add_argument("name"); create.add_argument("--template", choices=("python-api", "static", "browser-native", "vue"), default="python-api")
     for command in ("dev", "start"):
         cmd = sub.add_parser(command, help=f"run the local app ({command})")
         cmd.add_argument("--host", default=None); cmd.add_argument("--port", type=int, default=None)
@@ -73,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     frontend_doctor = frontend_sub.add_parser("doctor", help="inspect optional frontend tools")
     frontend_doctor.add_argument("directory", nargs="?", default=".")
     args = parser.parse_args(argv)
-    if args.command == "create": return _create(args.name)
+    if args.command == "create": return _create(args.name, args.template)
     if args.command in ("add", "remove"):
         try:
             message = edit_package_metadata(Path.cwd(), args.command, args.package, dev=getattr(args, "dev", False))
