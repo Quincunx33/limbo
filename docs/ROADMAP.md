@@ -125,6 +125,11 @@ The compiler contract must expose capability detection, transform inputs/outputs
 ### Phase 3 — Backend application essentials
 **Goal:** Make Limbo useful for real multi-user applications.
 
+**Status: IN PROGRESS (2026-11-02).** Phase 3 implementation begins with bounded server-side session storage and session middleware. The session cookie contains only a high-entropy opaque identifier; session data remains server-side. Session IDs can be explicitly rotated after authentication/privilege changes and revoked on logout. This first vertical slice is process-local and is not a distributed or persistent session backend.
+
+**Acceptance work remaining:** request accessors and validation responses; bounded upload streaming/persistence lifecycle; CSRF tokens and authentication/authorization extension points; WebSocket Origin and lifecycle policies; bounded background tasks with cancellation and shutdown; structured logging and app lifecycle hooks; integration/failure tests and examples.
+
+
 - Request API consistency: query, path, headers, cookies, JSON, forms, multipart and validation errors.
 - Upload lifecycle: size limits, safe filenames, streaming to disk, cleanup and non-overwrite policy.
 - Session lifecycle, cookie policy, rotation/expiry and clear signed-versus-encrypted semantics.
