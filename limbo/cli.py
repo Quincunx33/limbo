@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import shutil
+import subprocess
 import sys
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -70,6 +71,18 @@ def _load_app() -> object:
     if app is None or not callable(getattr(app, "run", None)):
         raise TypeError("app.py must define `app = Limbo(...)`")
     return app
+
+
+def _tool_status(executable: str, version_args: tuple[str, ...]) -> str:
+    path = shutil.which(executable)
+    if not path:
+        return "not found (optional)"
+    try:
+        result = subprocess.run([path, *version_args], capture_output=True, text=True, timeout=3, check=False)
+        lines = (result.stdout or result.stderr).strip().splitlines()
+        return f"{path} ({lines[0] if lines else 'version unavailable'})"
+    except (OSError, subprocess.SubprocessError):
+        return f"{path} (version unavailable)"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -149,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Configuration: invalid ({exc})", file=sys.stderr)
             return 2
         status = "loaded " + str(config.path) if config.path else "defaults (no limbo.toml)"
-        print(f"Python: {sys.version.split()[0]}\nConfiguration: {status}\ncloudflared: {shutil.which('cloudflared') or 'not found (optional)'}\nNode.js: {shutil.which('node') or 'not found (optional)'}")
+        print(f"Python: {sys.version.split()[0]}\nConfiguration: {status}\ncloudflared: {_tool_status('cloudflared', ('--version',))}\nNode.js: {_tool_status('node', ('--version',))}")
         return 0
     if args.command == "build":
         print("Production frontend builds are not implemented in Limbo 0.3.0; no build was run.", file=sys.stderr)
