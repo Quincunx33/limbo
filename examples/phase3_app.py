@@ -96,8 +96,8 @@ def websocket(request, connection):
 @app.post("/jobs", middleware=(require_login,))
 def enqueue_job(request):
     value = request.json_as(dict).get("value")
-    future = app.background_tasks.submit(lambda item: item.upper(), str(value))
-    return {"accepted": True, "result": future.result(timeout=2)}
+    app.background_tasks.submit(lambda item: item.upper(), str(value))
+    return {"accepted": True}
 
 
 if __name__ == "__main__":
