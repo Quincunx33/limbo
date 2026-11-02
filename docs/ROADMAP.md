@@ -145,6 +145,8 @@ The compiler contract must expose capability detection, transform inputs/outputs
 ### Phase 4 — Configuration and CLI experience
 **Goal:** Make projects reproducible and easy to operate.
 
+**Status: IN PROGRESS.** First implementation slice adds typed TOML sections, strict unknown-key/type/range validation, supported `LIMBO_` environment overrides, CLI-over-environment-over-file precedence for server host/port, and configuration checks in `limbo doctor`. Python 3.11+ uses `tomllib`; Python 3.10 uses optional `tomli`. `limbo create` emits the starter config format. CI coverage is running; the remaining commands and template matrix are still open.
+
 - Implement and validate `limbo.toml` with typed sections for app, server, frontend, build, static, security, database and tunnel.
 - Define precedence: CLI flags > environment variables > config file > safe defaults.
 - Helpful configuration errors with file/line/key context; never print secrets.
