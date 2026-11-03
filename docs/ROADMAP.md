@@ -2,10 +2,10 @@
 
 **Status:** Engineering roadmap  
 **Current baseline:** 0.9.0 engineering release  
-**Working branch:** `engineering/universal-limbo`  
+**Working branch:** `main`
 **Target:** 1.0.0 remains unreleased until the Phase 10 review gates are actually signed off
 
-**Engineering status (2026-11-03):** Phases 1–4 were already complete. Phase 5's verified local pipeline stays in place, with PostCSS-complete CSS Modules and Svelte state HMR still explicitly out of scope. Phases 6–9 now have tested implementations: browser-native production builds, an honest framework matrix plus a local process supervisor, SQLite migrations, and optional `cloudflared` supervision. Phase 10 documentation, fuzz checks and a local benchmark script exist. Independent security review and a signed Windows/macOS run do not, so this is not 1.0. See [STATUS.md](STATUS.md).
+**Engineering status (2026-11-04):** Phases 1–4 are complete. Phase 5 has a verified local pipeline and browser smoke coverage, with PostCSS-complete CSS Modules and Svelte state HMR still explicitly out of scope. Phases 6–9 have tested implementations: browser-native production builds, an honest framework matrix plus a local process supervisor, SQLite migrations, and optional `cloudflared` supervision. The private repository's final GitHub Actions run is green on Linux and Windows across Python 3.10–3.13, including the optional frontend-tool/browser job. The hosted macOS runner repeatedly hung and is intentionally excluded from the workflow; no macOS support claim is made. Independent security review is still outstanding, so this is not 1.0. See [STATUS.md](STATUS.md).
 
 This roadmap is a delivery plan, not a claim that planned features already exist. A capability is supported only after its implementation, end-to-end tests, documentation and compatibility entry are complete.
 
@@ -78,7 +78,7 @@ The compiler contract must expose capability detection, transform inputs/outputs
 
 - Freeze a documented public API baseline and define supported Python versions and OS matrix.
 - Keep `engineering/universal-limbo` isolated from `main`.
-- Add CI for Python versions and then Linux, Windows and macOS.
+- Add CI for supported Python versions and deterministic hosted platforms; keep unavailable or unstable hosted runners out of the support claim.
 - Add capability matrix: implemented, experimental, planned, unsupported.
 - Add security policy, test conventions, benchmark baselines and release checklist.
 
@@ -110,7 +110,7 @@ The compiler contract must expose capability detection, transform inputs/outputs
 
 **Status: COMPLETE (2026-11-02).** Static responses stream from open file descriptors and expose an explicit Response.close() lifecycle for abandoned streams. The default symlink-deny path uses directory-relative no-follow opens where supported; portable fallback and within-root symlink race limitations are documented. Directory indexes are opt-in. Conditional GET precedence, weak ETags, Last-Modified, single byte ranges, 416, If-Range, HEAD metadata, MIME/cache headers, redirects, cookies, Vary and Accept negotiation are implemented. Unsupported units, malformed syntax and multiple ranges are ignored; valid unsatisfiable ranges return 416 and oversized end offsets are clamped. Optional SPA fallback is restricted to missing paths whose request accepts HTML; non-HTML API/asset requests remain 404. Built-in CORS, security headers, request IDs, access logging, bounded process-local token-bucket rate limiting and negotiated gzip are implemented, with integration and failure-path tests.
 
-**Verification:** Full standard-library suite passed on Linux with Python 3.10, 3.11, 3.12 and 3.13. Phase 2 static/middleware smoke suites passed on Ubuntu, Windows and macOS. CI run: https://github.com/Quincunx33/limbo/actions/runs/41465088436.
+**Verification:** Full standard-library suite passed on Linux with Python 3.10, 3.11, 3.12 and 3.13. Phase 2 static/middleware smoke suites passed on Ubuntu and Windows. The final CI run is [Tests #41719193704](https://github.com/taaissu/limbo-framework/actions/runs/41719193704).
 
 **Assurance boundary:** this is implementation and CI completion, not an independent security audit or production certification. Descriptor-relative no-follow protection depends on OS support; fallback and within-root mode have weaker race guarantees. The in-memory rate limiter is process-local, not distributed. Configure deployment-specific proxy, CSP, HSTS, CORS and cache policies before public exposure.
 
@@ -131,7 +131,7 @@ The compiler contract must expose capability detection, transform inputs/outputs
 
 **Verification:** 51 focused Phase 3 tests and the complete 169-test standard-library suite pass on Linux with the current Python runtime. Coverage includes Content-Length and chunked streaming, bounded reads, large-file spooling, cleanup on success/failure, upload limits, sessions, expiry/concurrency, CSRF, authentication/authorization, WebSocket policies/timeouts and background-task shutdown.
 
-**Assurance boundary:** Windows/macOS CI and deployment-specific security review remain release-gate work; this environment cannot execute those operating systems. Durable queues, distributed sessions and production security certification are explicitly outside Phase 3.
+**Assurance boundary:** macOS CI and deployment-specific security review remain release-gate work; the hosted macOS runner is not part of the current workflow. Durable queues, distributed sessions and production security certification are explicitly outside Phase 3.
 
 
 - Request API consistency: query, path, headers, cookies, JSON, forms, multipart and validation errors.
@@ -151,7 +151,7 @@ The compiler contract must expose capability detection, transform inputs/outputs
 
 **Verification:** 22 focused Phase 4 tests pass, including configuration precedence/validation, CLI failure semantics, metadata-only dependency edits, preview directory checks and clean starter generation. Generated Python starters compile; all four templates emit valid configuration/readme files, and the Vue starter's generated module source is covered against escaped-newline regressions.
 
-**Assurance boundary:** Windows/macOS CI and release-level packaging checks remain release-gate work; this environment cannot execute those operating systems. Limbo does not silently install dependencies, and production `build` is intentionally deferred to Phase 6.
+**Assurance boundary:** macOS CI and release-level packaging checks remain release-gate work. Limbo does not silently install dependencies, and production `build` is intentionally deferred to Phase 6.
 
 - Implement and validate `limbo.toml` with typed sections for app, server, frontend, build, static, security, database and tunnel.
 - Define precedence: CLI flags > environment variables > config file > safe defaults.
@@ -166,11 +166,11 @@ The compiler contract must expose capability detection, transform inputs/outputs
 ### Phase 5 — Frontend development engine
 **Goal:** Turn current frontend preview into a reliable local compiler/dev pipeline.
 
-**Status: IN PROGRESS — resolver/graph/cache and reload foundations landed.** Added a public `CompilerAdapter` protocol, immutable capability/result models, deterministic adapter registry, versioned JSON capability manifest, browser-native JS/MJS/CSS adapter, optional local esbuild adapter for TS/TSX/JSX, and optional Vue/Svelte SFC adapters backed by local compiler packages. Added `limbo frontend capabilities [directory] [--json]`; no compiler is downloaded or installed. Dependency discovery uses lexical ESM and CSS scanners for static imports, re-exports, literal dynamic imports, CSS `@import` and quoted `url()` assets. CSS side-effect imports are served through JS stylesheet-link modules; CSS imports with bindings are rejected. Transformed modules are cached persistently using content-addressed keys under ignored `.limbo/cache/frontend`. A polling client triggers safe full-page reloads on changed watched modules/assets; this is explicitly not state-preserving HMR. See [Frontend adapter contract](FRONTEND_ADAPTERS.md).
+**Status: VERIFIED SLICE — resolver/graph/cache, adapters and browser smoke foundations landed.** Added a public `CompilerAdapter` protocol, immutable capability/result models, deterministic adapter registry, versioned JSON capability manifest, browser-native JS/MJS/CSS adapter, optional local esbuild adapter for TS/TSX/JSX, and optional Vue/Svelte SFC adapters backed by local compiler packages. Added `limbo frontend capabilities [directory] [--json]`; no compiler is downloaded or installed. Dependency discovery uses lexical ESM and CSS scanners for static imports, re-exports, literal dynamic imports, CSS `@import` and quoted `url()` assets. CSS side-effect imports are served through JS stylesheet-link modules; CSS imports with bindings are rejected. Transformed modules are cached persistently using content-addressed keys under ignored `.limbo/cache/frontend`. Opt-in accepted updates, safe full-page reload fallback, Vue reload hooks, WASM execution and browser fixtures are covered in CI. Svelte state HMR and full PostCSS-compatible CSS Modules remain out of scope. See [Frontend adapter contract](FRONTEND_ADAPTERS.md).
 
-**Verification added:** unit coverage for native JS/CSS pass-through, extension rejection, project-root enforcement, duplicate adapter IDs, stable manifest JSON and CLI output; lexical ESM/CSS scanner coverage; CSS module serving; content-addressed cache persistence/invalidation; optional Vue/Svelte adapter detection; and full-reload endpoint/version behavior. The Phase 5 test file is included in the Linux/Windows/macOS platform-smoke workflow and the complete Python-version unit suite.
+**Verification added:** unit coverage for native JS/CSS pass-through, extension rejection, project-root enforcement, duplicate adapter IDs, stable manifest JSON and CLI output; lexical ESM/CSS scanner coverage; CSS module serving; content-addressed cache persistence/invalidation; optional Vue/Svelte adapter detection; and full-reload endpoint/version behavior. Browser/HMR/WASM smoke fixtures run in the dedicated optional-tool job; deterministic unit and platform smoke coverage runs on Linux and Windows.
 
-**Remaining Phase 5 work:** full package `exports`/`imports` edge semantics, complete PostCSS-compatible CSS Modules behavior, and Svelte-specific component-state HMR. Acorn AST scanning now covers ordinary JavaScript, while TypeScript/JSX use esbuild and a lexical fallback remains for minimal environments. TypeScript-in-SFC composed maps have real-tool validation. Vue SFCs register stable HMR identities and use Vue's runtime reload hook. CI installs Acorn, esbuild, Vue and Svelte tooling and runs the real browser fixture gate. This phase is not complete until the remaining framework and package semantics pass the end-to-end exit gate.
+**Remaining Phase 5 work:** full package `exports`/`imports` edge semantics, complete PostCSS-compatible CSS Modules behavior, and Svelte-specific component-state HMR. Acorn AST scanning now covers ordinary JavaScript, while TypeScript/JSX use esbuild and a lexical fallback remains for minimal environments. TypeScript-in-SFC composed maps have real-tool validation. Vue SFCs register stable HMR identities and use Vue's runtime reload hook. CI installs Acorn, esbuild, Vue and Svelte tooling and runs the real browser fixture gate. This phase remains a verified slice rather than a universal framework-support claim.
 
 1. Specify compiler adapter API and machine-readable capability manifest. **Foundation implemented; continue evolving contract against real adapters.**
 2. Upgrade dependency discovery beyond regex-only literal imports; handle static ESM, re-exports, CSS imports, assets and supported dynamic imports. **Optional Acorn AST scanning is parser-grade for ordinary JavaScript; esbuild handles TS/JSX and computed imports remain diagnostic-only.**
@@ -263,7 +263,7 @@ SSR frameworks may require local Node.js. This is an optional integration requir
 **Goal:** Prove the product is stable enough to call 1.0.
 
 - Unit, integration, malformed-wire, concurrency, lifecycle and regression suites.
-- Linux/Windows/macOS CI and supported Python-version matrix.
+- Linux/Windows CI and supported Python-version matrix; macOS remains an explicit unverified platform because the hosted runner is unstable.
 - Real browser smoke tests for each frontend adapter.
 - Benchmarks for routing, static files, request concurrency, compiler cache and build time.
 - Threat model and independent review of HTTP parsing, path handling, sessions, CSRF, CORS, uploads, WebSockets and tunnel exposure.

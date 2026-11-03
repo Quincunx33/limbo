@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.0 engineering updates — 2026-11-04
+
+- Added a private GitHub repository and green Actions coverage for Python 3.10–3.13 on Linux and Windows, plus optional frontend/compiler and Chromium browser fixtures.
+- Stabilized Windows canonical-path assertions and Chromium HMR/WASM smoke fixtures across Python versions.
+- Kept macOS explicitly unverified because the hosted runner repeatedly hung; the workflow makes no macOS support claim.
+
 ## 0.9.0
 
 - Production build for browser-native modules: content-addressed files, manifest, integrity, base path, CSS side-effect extraction, identity source maps, optional esbuild minify. Code splitting is an error. Missing compilers are errors.
