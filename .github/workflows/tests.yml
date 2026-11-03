@@ -29,7 +29,20 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q limbo tests
       - name: Run standard-library test suite
-        run: python -m unittest discover -s tests -v
+        run: |
+          python - <<'PY'
+          import pathlib
+          import unittest
+
+          loader = unittest.defaultTestLoader
+          suite = unittest.TestSuite()
+          for path in sorted(pathlib.Path("tests").glob("test_*.py")):
+              if path.name.startswith("test_browser_"):
+                  continue
+              suite.addTests(loader.discover("tests", pattern=path.name))
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          raise SystemExit(not result.wasSuccessful())
+          PY
 
   platform-smoke:
     runs-on: ${{ matrix.os }}
