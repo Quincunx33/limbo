@@ -18,7 +18,7 @@ from typing import Any
 from urllib.parse import quote, unquote
 
 from .http import Request, Response
-from .frontend_scanner import scan_imports
+from .frontend_scanner import rewrite_import_meta_hot, scan_imports
 from .frontend_cache import TransformCache
 from .css_scanner import scan_css_dependencies
 from .frontend_engine import (
@@ -34,6 +34,7 @@ EXTENSIONS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte", "
 GRAPH_SOURCE_EXTENSIONS = {".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".css"}
 BROWSER_BUILTINS = {"assert", "buffer", "child_process", "crypto", "events", "fs", "http", "https",
                     "module", "net", "os", "path", "process", "stream", "timers", "tls", "url", "util", "zlib"}
+_JS_RESERVED_WORDS = frozenset("await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield".split())
 IMPORT_RE = re.compile(
     r"(?:\b(?:import|export)\s+(?:[^'\"]*?\s+from\s*)?|\bimport\s*\(\s*)['\"]([^'\"]+)['\"]",
     re.MULTILINE,
@@ -127,29 +128,44 @@ class ModuleResolver:
             except (OSError, json.JSONDecodeError) as exc:
                 raise FrontendError(f"Invalid package imports map: {manifest_path}") from exc
             imports = manifest.get("imports", {})
-            target = imports.get(specifier) if isinstance(imports, dict) else None
-            if target is None and isinstance(imports, dict):
-                for key, value in imports.items():
-                    if "*" not in key: continue
+            target_value = imports.get(specifier) if isinstance(imports, dict) else None
+            if target_value is None and isinstance(imports, dict):
+                patterns = sorted(
+                    ((key, value) for key, value in imports.items() if "*" in key),
+                    key=lambda item: (len(item[0].split("*", 1)[0]), len(item[0].split("*", 1)[1])),
+                    reverse=True,
+                )
+                for key, value in patterns:
                     before, after = key.split("*", 1)
                     if specifier.startswith(before) and specifier.endswith(after):
                         middle = specifier[len(before):len(specifier) - len(after) if after else None]
-                        selected = self._conditional(value)
-                        target = selected.replace("*", middle) if selected else None
+                        target_value = (value, middle)
                         break
-            target = self._conditional(target)
-            if not target:
+            wildcard_middle = None
+            if isinstance(target_value, tuple) and len(target_value) == 2:
+                target_value, wildcard_middle = target_value
+            targets = self._conditional_candidates(target_value)
+            if wildcard_middle is not None:
+                targets = [target.replace("*", wildcard_middle) for target in targets]
+            if not targets:
                 raise FrontendError(f"Package does not define internal import '{specifier}'")
-            if target.startswith("./"):
-                package_root = parent.resolve()
-                candidate = (package_root / target[2:]).resolve()
-                try: candidate.relative_to(package_root)
-                except ValueError as exc: raise FrontendError(f"Package import escapes package root: {specifier}") from exc
-                found = self._resolve_path(candidate)
-                if not found: raise FrontendError(f"Package import target is missing: {specifier}")
-                self._assert_in_project(found)
-                return ResolvedModule(found, specifier, package_root)
-            return self.resolve(target, importer)
+            package_root = parent.resolve()
+            last_candidate = None
+            for target in targets:
+                if target.startswith("./"):
+                    candidate = (package_root / target[2:]).resolve()
+                    try: candidate.relative_to(package_root)
+                    except ValueError as exc: raise FrontendError(f"Package import escapes package root: {specifier}") from exc
+                    last_candidate = candidate
+                    found = self._resolve_path(candidate)
+                    if not found: continue
+                    self._assert_in_project(found)
+                    return ResolvedModule(found, specifier, package_root)
+                try:
+                    return self.resolve(target, importer)
+                except FrontendError:
+                    continue
+            raise FrontendError(f"Package import target is missing: {specifier} ({last_candidate})")
         raise FrontendError(f"No package.json imports map found for '{specifier}'")
 
     def _apply_alias(self, specifier: str) -> list[str] | None:
@@ -215,48 +231,59 @@ class ModuleResolver:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {}
         except (OSError, json.JSONDecodeError) as exc:
             raise FrontendError(f"Invalid package manifest for '{package_name}': {exc}") from exc
-        target = self._export_target(manifest.get("exports"), "." + ("/" + subpath if subpath else ""))
-        if manifest.get("exports") is not None and target is None:
+        export_targets = self._export_target_candidates(
+            manifest.get("exports"), "." + ("/" + subpath if subpath else "")
+        )
+        if manifest.get("exports") is not None and not export_targets:
             raise FrontendError(f"Package '{package_name}' does not export '{subpath or '.'}'")
-        if target is None and subpath:
-            target = "./" + subpath
-        if target is None:
+        if not export_targets and subpath:
+            export_targets = ["./" + subpath]
+        if not export_targets:
             browser = manifest.get("browser")
             if isinstance(browser, str):
-                target = browser
-            target = target or manifest.get("module") or manifest.get("main") or "index.js"
-        if not isinstance(target, str):
-            raise FrontendError(f"Package '{package_name}' has no browser/import entry for '{specifier}'")
-        candidate = (package_root / target.removeprefix("./")).resolve()
-        try:
-            candidate.relative_to(package_root)
-        except ValueError as exc:
-            raise FrontendError(f"Package export escapes package root: {specifier}") from exc
-        found = self._resolve_path(candidate)
-        if not found:
-            raise FrontendError(f"Package export for '{specifier}' points to a missing file: {candidate}")
-        self._assert_in_project(found)
-        return ResolvedModule(found, specifier, package_root)
+                export_targets = [browser]
+            else:
+                export_targets = [manifest.get("module") or manifest.get("main") or "index.js"]
+        last_candidate: Path | None = None
+        for target in export_targets:
+            if manifest.get("exports") is None and isinstance(target, str) and not target.startswith("./"):
+                target = "./" + target
+            if not isinstance(target, str) or not target.startswith("./"):
+                raise FrontendError(f"Invalid package export target for '{specifier}': {target!r}")
+            candidate = (package_root / target[2:]).resolve()
+            try:
+                candidate.relative_to(package_root)
+            except ValueError as exc:
+                raise FrontendError(f"Package export escapes package root: {specifier}") from exc
+            last_candidate = candidate
+            found = self._resolve_path(candidate)
+            if found:
+                self._assert_in_project(found)
+                return ResolvedModule(found, specifier, package_root)
+        raise FrontendError(f"Package export for '{specifier}' points to a missing file: {last_candidate}")
 
-    def _export_target(self, exports: Any, subpath: str) -> str | None:
+    def _export_target_candidates(self, exports: Any, subpath: str) -> list[str]:
         if exports is None:
-            return None
+            return []
         if isinstance(exports, str):
-            return exports if subpath == "." else None
+            return [exports] if subpath == "." else []
         if isinstance(exports, list):
+            candidates: list[str] = []
             for value in exports:
-                selected = self._export_target(value, subpath)
-                if selected: return selected
-            return None
+                candidates.extend(self._export_target_candidates(value, subpath))
+            return candidates
         if not isinstance(exports, dict):
-            return None
+            return []
         subpath_map = any(str(key).startswith(".") for key in exports)
         if subpath_map:
             if subpath in exports:
-                return self._conditional(exports[subpath])
+                return self._conditional_candidates(exports[subpath])
             patterns = sorted(
                 ((key, value) for key, value in exports.items() if "*" in key),
-                key=lambda item: (len(item[0].replace("*", "")), item[0]),
+                key=lambda item: (
+                    len(item[0].split("*", 1)[0]),
+                    len(item[0].split("*", 1)[1]),
+                ),
                 reverse=True,
             )
             for key, value in patterns:
@@ -264,21 +291,44 @@ class ModuleResolver:
                 before, after = key.split("*", 1)
                 if subpath.startswith(before) and subpath.endswith(after):
                     middle = subpath[len(before):len(subpath) - len(after) if after else None]
-                    resolved = self._conditional(value)
-                    return resolved.replace("*", middle) if resolved else None
-            return None
-        return self._conditional(exports) if subpath == "." else None
+                    return [target.replace("*", middle) for target in self._conditional_candidates(value)]
+            return []
+        return self._conditional_candidates(exports) if subpath == "." else []
+
+    def _conditional_candidates(self, value: Any) -> list[str]:
+        if isinstance(value, str):
+            return [value]
+        if value is None:
+            raise FrontendError("Package target is blocked by a null export/imports target")
+        if isinstance(value, list):
+            candidates: list[str] = []
+            for item in value:
+                candidates.extend(self._conditional_candidates(item))
+            return candidates
+        if isinstance(value, dict):
+            active = set(self.conditions)
+            active.add("default")
+            for condition, target in value.items():
+                if condition in active:
+                    return self._conditional_candidates(target)
+        return []
 
     def _conditional(self, value: Any) -> str | None:
         if isinstance(value, str): return value
+        if value is None:
+            raise FrontendError("Package target is blocked by a null export/imports target")
         if isinstance(value, list):
             for item in value:
                 selected = self._conditional(item)
                 if selected: return selected
         if isinstance(value, dict):
-            for condition in self.conditions:
-                if condition in value:
-                    selected = self._conditional(value[condition])
+            active = set(self.conditions)
+            active.add("default")
+            # Node evaluates condition objects in the order written in package.json;
+            # condition names form the active set rather than a priority list.
+            for condition, target in value.items():
+                if condition in active:
+                    selected = self._conditional(target)
                     if selected: return selected
         return None
 
@@ -326,16 +376,18 @@ class DependencyGraph:
             else:
                 self.diagnostics[current] = ()
                 dependencies = []
-            for specifier, _kind in dependencies:
+            for specifier, kind in dependencies:
                 if specifier.startswith(("http://", "https://", "data:")):
                     continue
-                if current.suffix.lower() == ".css" and not specifier.startswith(("./", "../", "/")):
-                    raise FrontendError(
-                        f"Bare CSS dependency '{specifier}' in {current.name} is not supported yet; use a relative URL"
-                    )
-                if not specifier.startswith(("./", "../", "/", "#")):
+                if current.suffix.lower() == ".css" and kind == "asset" and not specifier.startswith("/"):
+                    dependency = self.resolver._resolve_path(current.parent / specifier)
+                    if not dependency:
+                        raise FrontendError(f"CSS asset '{specifier}' in {current.name} was not found")
+                    self.resolver._assert_in_project(dependency)
+                else:
+                    dependency = self.resolver.resolve(specifier, current).path
+                if current.suffix.lower() != ".css" and not specifier.startswith(("./", "../", "/", "#")):
                     bare.add(specifier)
-                dependency = self.resolver.resolve(specifier, current).path
                 local_edges.add(dependency)
                 if dependency.suffix.lower() in GRAPH_SOURCE_EXTENSIONS:
                     pending.append(dependency)
@@ -432,9 +484,12 @@ class FrontendCompiler:
             return result.stdout
         raise FrontendError(f"No frontend transformer is configured for {suffix or 'extensionless'} files")
 
-    def _esbuild_stdin(self, source: str, loader: str, source_path: Path, jsx_import_source: str) -> str:
+    def _esbuild_stdin(self, source: str, loader: str, source_path: Path, jsx_import_source: str,
+                       *, source_map: bool = False) -> str:
         args = [self.esbuild, "--loader=" + loader, "--format=esm", "--target=es2020", "--jsx=automatic",
                 "--jsx-import-source=" + jsx_import_source, "--sourcefile=" + source_path.name, "--log-level=error"]
+        if source_map:
+            args.append("--sourcemap=inline")
         try:
             result = subprocess.run(args, cwd=self.root, input=source, text=True, capture_output=True, timeout=30)
         except (OSError, subprocess.TimeoutExpired) as exc:
@@ -500,6 +555,7 @@ class FrontendDevServer:
         ))
         self.cache = TransformCache(self.root)
         self._allowed_modules: set[Path] = set()
+        self._last_version_snapshot: dict[str, str] | None = None
 
     def import_map(self, entry: str) -> dict[str, Any]:
         graph = self.graph.build(entry, transform=self._source_for_graph)
@@ -517,8 +573,8 @@ class FrontendDevServer:
         import_map = json.dumps(self.import_map(entry), separators=(",", ":")).replace("</", "<\\/")
         source = self.prefix + "/" + quote(entry.lstrip("/"), safe="/@._-")
         return (f'<script type="importmap">{import_map}</script>\n'
-                f'<script type="module" src="{html.escape(source, quote=True)}"></script>\n'
-                f'<script src="{html.escape(self.prefix + "/_client.js", quote=True)}" defer></script>')
+                f'<script src="{html.escape(self.prefix + "/_client.js", quote=True)}"></script>\n'
+                f'<script type="module" src="{html.escape(source, quote=True)}"></script>')
 
     def serve(self, request: Request) -> Response:
         if not (request.path == self.prefix or request.path.startswith(self.prefix + "/")):
@@ -530,18 +586,65 @@ class FrontendDevServer:
                 if not entry: return Response.json({"error": "Missing entry query parameter"}, 400)
                 return Response.json(self.import_map(entry), headers={"Cache-Control": "no-store"})
             if relative == "_version":
-                return Response.json({"version": self._version_token()}, headers={"Cache-Control": "no-store"})
+                return Response.json(self._version_payload(), headers={"Cache-Control": "no-store"})
             if relative == "_client.js":
-                client = ("(()=>{const key='__limbo_hmr_state__';"
-                          "const restore=()=>{try{const raw=sessionStorage.getItem(key);if(!raw)return;"
-                          "const state=JSON.parse(raw);sessionStorage.removeItem(key);"
-                          "window.__LIMBO_HMR_STATE__=state;window.dispatchEvent(new CustomEvent('limbo:hmr-ready',{detail:state}))}catch(_){}};"
-                          "const preserve=()=>{try{if(window.__LIMBO_HMR_STATE__!==undefined)"
-                          "sessionStorage.setItem(key,JSON.stringify(window.__LIMBO_HMR_STATE__))}catch(_){}};"
-                          "restore();let version=null;const poll=async()=>{try{const r=await fetch(" + json.dumps(self.prefix + "/_version") + ",{cache:'no-store'});"
-                          "if(!r.ok)return;const d=await r.json();if(version===null)version=d.version;"
-                          "else if(version!==d.version){preserve();location.reload()}}catch(_){}};poll();setInterval(poll,1200)})();")
+                client = r"""(()=>{
+const modules=new Map();
+const moduleId=url=>new URL(url,location.href).pathname;
+const hot=url=>{
+  const id=moduleId(url);let context=modules.get(id);
+  if(!context){context={id,data:{},self:false,selfCallback:null,dependencies:new Map(),disposeCallback:null};modules.set(id,context)}
+  context.accept=(dependencies,callback)=>{
+    if(typeof dependencies==='function'||dependencies===undefined){context.self=true;context.selfCallback=typeof dependencies==='function'?dependencies:null;return}
+    for(const dependency of (Array.isArray(dependencies)?dependencies:[dependencies]))context.dependencies.set(moduleId(new URL(dependency,url)),callback||null);
+  };
+  context.dispose=callback=>{context.disposeCallback=callback};return context;
+};
+window.__LIMBO_HMR_HOT__=hot;
+const importFresh=(url,version)=>{const next=new URL(url,location.href);next.searchParams.set('__limbo_hmr',version);return import(next.href)};
+const applyUpdate=async(url,version)=>{
+  const id=moduleId(url);let handled=false;
+  for(const context of modules.values()){
+    if(context.id===id&&context.self){handled=true;const callback=context.selfCallback;const data=context.data;if(context.disposeCallback)await context.disposeCallback(data);const updated=await importFresh(id,version);if(callback)await callback(updated)}
+    if(context.dependencies.has(id)){handled=true;const updated=await importFresh(id,version);const callback=context.dependencies.get(id);if(callback)await callback(updated)}
+  }
+  return handled;
+};
+const key='__limbo_hmr_state__';
+const restore=()=>{try{const raw=sessionStorage.getItem(key);if(!raw)return;const state=JSON.parse(raw);sessionStorage.removeItem(key);window.__LIMBO_HMR_STATE__=state;window.dispatchEvent(new CustomEvent('limbo:hmr-ready',{detail:state}))}catch(_){}};
+const preserve=()=>{try{if(window.__LIMBO_HMR_STATE__!==undefined)sessionStorage.setItem(key,JSON.stringify(window.__LIMBO_HMR_STATE__))}catch(_){}};
+restore();let version=null;
+const poll=async()=>{try{const response=await fetch("__VERSION_URL__",{cache:'no-store'});if(!response.ok)return;const data=await response.json();if(version===null){version=data.version;return}if(version===data.version)return;let fallback=false;for(const changed of data.changed||[]){if(!await applyUpdate(changed,data.version))fallback=true}if(fallback){preserve();location.reload()}else version=data.version}catch(_){preserve();location.reload()}};
+poll();setInterval(poll,1200);
+})();""".replace("__VERSION_URL__", self.prefix + "/_version")
                 return Response(client, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
+            if relative.startswith("_cssmodule/"):
+                css_relative = unquote(relative[len("_cssmodule/"):])
+                css_path = (self.root / css_relative).resolve()
+                if css_path not in self._allowed_modules or css_path.suffix.lower() != ".css":
+                    return Response.text("CSS module not found", 404)
+                classes, _compiled_css = self._compile_css_module(css_path)
+                encoded_classes = json.dumps(classes, separators=(",", ":"))
+                css_url = self.prefix + "/_cssmodule-css/" + quote(css_relative, safe="/@._-")
+                exports = "".join(
+                    f"export const {name}=styles[{json.dumps(name)}];\n"
+                    for name in classes if name.isidentifier() and name not in _JS_RESERVED_WORDS
+                )
+                js = (f"const styles=Object.freeze({encoded_classes});\n"
+                      "const link=document.createElement('link');link.rel='stylesheet';link.href="
+                      + json.dumps(css_url) + ";document.head.appendChild(link);\n"
+                      + exports + "export default styles;\n")
+                return Response(js, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
+            if relative.startswith("_cssmodule-css/"):
+                css_relative = unquote(relative[len("_cssmodule-css/"):])
+                asset_path = (self.root / css_relative).resolve()
+                if asset_path not in self._allowed_modules:
+                    return Response.text("CSS module asset not found", 404)
+                if asset_path.suffix.lower() == ".css":
+                    _classes, compiled_css = self._compile_css_module(asset_path)
+                    compiled_css = self._rewrite_css_imports(compiled_css, asset_path)
+                    return Response(compiled_css, 200, {"Content-Type": "text/css; charset=utf-8", "Cache-Control": "no-store"})
+                return Response(asset_path.read_bytes(), 200, {"Content-Type": _mime(asset_path), "Cache-Control": "no-store"})
             if relative.startswith("_css/"):
                 css_relative = unquote(relative[len("_css/"):])
                 # A missing or malformed URL is a normal not-found response,
@@ -564,6 +667,9 @@ class FrontendDevServer:
                     return Response(content, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
                 if module_path.suffix.lower() in (".css", ".svg", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico",
                                                     ".woff", ".woff2", ".ttf", ".wasm", ".mp3", ".mp4"):
+                    if module_path.suffix.lower() == ".css":
+                        content = self._rewrite_css_imports(module_path.read_text(encoding="utf-8"), module_path)
+                        return Response(content, 200, {"Content-Type": "text/css; charset=utf-8", "Cache-Control": "no-store"})
                     return Response(module_path.read_bytes(), 200, {"Content-Type": _mime(module_path), "Cache-Control": "no-store"})
                 return Response.text("Frontend package asset type is not supported", 404)
             decoded = unquote(relative)
@@ -583,7 +689,10 @@ class FrontendDevServer:
                 return Response(content, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
             if candidate.suffix.lower() not in (".css", ".svg", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico",
                                                    ".woff", ".woff2", ".ttf", ".wasm", ".mp3", ".mp4"):
-                return Response.text("Frontend asset type is not publicly served", 404)
+                return Response.text("Frontend asset type is not supported", 404)
+            if candidate.suffix.lower() == ".css":
+                content = self._rewrite_css_imports(candidate.read_text(encoding="utf-8"), candidate)
+                return Response(content, 200, {"Content-Type": "text/css; charset=utf-8", "Cache-Control": "no-store"})
             return Response(candidate.read_bytes(), 200, {"Content-Type": _mime(candidate), "Cache-Control": "no-store"})
         except (FrontendError, ValueError, OSError) as exc:
             return Response.text(str(exc), 422)
@@ -606,6 +715,33 @@ class FrontendDevServer:
             digest.update(b"\\n")
         return digest.hexdigest()
 
+    def _version_payload(self) -> dict[str, Any]:
+        snapshot: dict[str, str] = {}
+        for path in self._allowed_modules:
+            resolved = path.resolve()
+            relative = resolved.relative_to(self.root).as_posix()
+            if relative.startswith("node_modules/"):
+                url = self.prefix + "/_pkgfile/" + quote(relative, safe="/@._-")
+            else:
+                url = self.prefix + "/" + quote(relative, safe="/@._-")
+            try:
+                fingerprint = hashlib.sha256(resolved.read_bytes()).hexdigest()
+            except OSError:
+                fingerprint = "missing"
+            snapshot[url] = fingerprint
+        changed: list[str] = []
+        previous = self._last_version_snapshot
+        if previous is not None:
+            changed = sorted(
+                url for url in set(previous) | set(snapshot)
+                if previous.get(url) != snapshot.get(url)
+            )
+        self._last_version_snapshot = snapshot
+        digest = hashlib.sha256()
+        for url, fingerprint in sorted(snapshot.items()):
+            digest.update(url.encode("utf-8") + b"\0" + fingerprint.encode("ascii") + b"\n")
+        return {"version": digest.hexdigest(), "changed": changed}
+
     def _rewrite_internal_imports(self, code: str, importer: Path) -> str:
         try:
             scan = scan_imports(code)
@@ -618,20 +754,59 @@ class FrontendDevServer:
                 target = self.resolver.resolve(specifier, importer).path
                 replacement = self._module_url(target)
             elif specifier.lower().endswith(".css"):
-                if reference.kind != "side-effect":
-                    raise FrontendError(
-                        f"CSS imports with bindings are not supported yet in {importer.name}; use a side-effect import"
-                    )
                 target = self.resolver.resolve(specifier, importer).path
                 self._allowed_modules.add(target)
                 relative = target.relative_to(self.root).as_posix()
-                replacement = self.prefix + "/_css/" + quote(relative, safe="/@._-")
+                if reference.kind == "side-effect":
+                    replacement = self.prefix + "/_css/" + quote(relative, safe="/@._-")
+                elif reference.kind == "static":
+                    replacement = self.prefix + "/_cssmodule/" + quote(relative, safe="/@._-")
+                else:
+                    raise FrontendError(f"Unsupported CSS import form in {importer.name}")
             else:
                 continue
             replacements.append((reference.start, reference.end, json.dumps(replacement)))
         for start, end, replacement in reversed(replacements):
             code = code[:start] + replacement + code[end:]
-        return code
+        return rewrite_import_meta_hot(code)
+
+    def _compile_css_module(self, path: Path) -> tuple[dict[str, str], str]:
+        try:
+            source = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise FrontendError(f"Cannot read CSS module {path.name}: {exc}") from exc
+        relative = path.relative_to(self.root).as_posix()
+        classes: dict[str, str] = {}
+        selector_pattern = re.compile(r"([^{}]+)(\{)")
+        class_pattern = re.compile(r"(?<![\w-])\.([A-Za-z_][\w-]*)")
+
+        def replace_selector(match: re.Match[str]) -> str:
+            selector = match.group(1)
+            if selector.lstrip().startswith("@"):
+                return match.group(0)
+            def rename(class_match: re.Match[str]) -> str:
+                name = class_match.group(1)
+                renamed = classes.get(name)
+                if renamed is None:
+                    digest = hashlib.sha256(f"{relative}:{name}".encode("utf-8")).hexdigest()[:7]
+                    renamed = f"{name}_{digest}"
+                    classes[name] = renamed
+                return "." + renamed
+            return class_pattern.sub(rename, selector) + match.group(2)
+
+        return classes, selector_pattern.sub(replace_selector, source)
+
+    def _rewrite_css_imports(self, source: str, importer: Path) -> str:
+        replacements: list[tuple[int, int, str]] = []
+        for reference in scan_css_dependencies(source):
+            if reference.kind != "import" or reference.specifier.startswith(("./", "../", "/", "#", "data:", "http://", "https://")):
+                continue
+            target = self.resolver.resolve(reference.specifier, importer).path
+            self._allowed_modules.add(target)
+            replacements.append((reference.start, reference.end, self._module_url(target)))
+        for start, end, replacement in reversed(replacements):
+            source = source[:start] + replacement + source[end:]
+        return source
 
     def _transform_cached(self, path: Path) -> str:
         resolved = path.resolve(strict=True)

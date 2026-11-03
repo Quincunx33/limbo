@@ -115,6 +115,35 @@ class FrontendResolverTests(unittest.TestCase):
         self.assertEqual(resolver.resolve("demo-package/features/special/one").path.name, "one.js")
         with self.assertRaises(ValueError): ModuleResolver(self.root, conditions=())
 
+    def test_package_condition_object_order_and_null_exports(self):
+        package = self.root / "node_modules" / "demo-package"
+        (package / "import-first.js").write_text("export default 'import';", encoding="utf-8")
+        (package / "package.json").write_text(json.dumps({
+            "name": "demo-package",
+            "exports": {
+                ".": {"import": "./import-first.js", "browser": "./browser.js", "default": "./cjs.js"},
+                "./private": None,
+            },
+        }), encoding="utf-8")
+        resolver = ModuleResolver(self.root, conditions=("browser", "import", "default"))
+        self.assertEqual(resolver.resolve("demo-package").path.name, "import-first.js")
+        with self.assertRaisesRegex(FrontendError, "null export/imports target"):
+            resolver.resolve("demo-package/private")
+
+    def test_exports_and_imports_fallback_arrays_skip_missing_targets(self):
+        package = self.root / "node_modules" / "demo-package"
+        (package / "fallback.js").write_text("export default 'fallback';", encoding="utf-8")
+        (package / "package.json").write_text(json.dumps({
+            "name": "demo-package",
+            "exports": {".": ["./missing.js", "./fallback.js"]},
+        }), encoding="utf-8")
+        resolver = ModuleResolver(self.root)
+        self.assertEqual(resolver.resolve("demo-package").path.name, "fallback.js")
+        (self.root / "package.json").write_text(json.dumps({
+            "imports": {"#internal": ["./missing-internal.js", "./src/util.ts"]},
+        }), encoding="utf-8")
+        self.assertEqual(resolver.resolve("#internal", self.root / "src" / "main.ts").path.name, "util.ts")
+
 
 class FrontendServingTests(unittest.TestCase):
     def test_generated_project_serves_frontend_entry(self):
@@ -186,10 +215,14 @@ class FrontendServingTests(unittest.TestCase):
             self.assertIn(b"location.reload()", client.body)
             self.assertIn(b"sessionStorage", client.body)
             self.assertIn(b"limbo:hmr-ready", client.body)
+            self.assertIn(b"__LIMBO_HMR_HOT__", client.body)
+            self.assertIn(b"importFresh", client.body)
             old_version = json.loads(first.body)["version"]
             (root / "main.js").write_text('export const value = 2;', encoding="utf-8")
             new_version = frontend.serve(Request("GET", "/__limbo/_version", {}))
-            self.assertNotEqual(old_version, json.loads(new_version.body)["version"])
+            payload = json.loads(new_version.body)
+            self.assertNotEqual(old_version, payload["version"])
+            self.assertIn("/__limbo/main.js", payload["changed"])
 
     def test_dev_server_uses_content_addressed_transform_cache(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -225,6 +258,27 @@ class FrontendServingTests(unittest.TestCase):
             self.assertIn(b"document.head.appendChild", css_module.body)
             self.assertEqual(frontend.serve(Request("GET", "/__limbo/_css/src/unknown.css", {})).status, 404)
 
+    def test_css_module_import_exports_mapping_and_rewrites_class_selectors(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "src").mkdir()
+            (root / "src" / "main.js").write_text(
+                'import styles from "./button.module.css"; export const button = styles.button;', encoding="utf-8")
+            (root / "src" / "button.module.css").write_text(
+                ".button, .active:hover { color: red; }\n", encoding="utf-8")
+            frontend = FrontendDevServer(root)
+            entry = frontend.serve(Request("GET", "/__limbo/src/main.js", {}))
+            self.assertEqual(entry.status, 200)
+            self.assertIn(b"/_cssmodule/src/button.module.css", entry.body)
+            module = frontend.serve(Request("GET", "/__limbo/_cssmodule/src/button.module.css", {}))
+            self.assertEqual(module.status, 200)
+            self.assertIn(b'"button":"button_', module.body)
+            self.assertIn(b"export default styles", module.body)
+            css = frontend.serve(Request("GET", "/__limbo/_cssmodule-css/src/button.module.css", {}))
+            self.assertEqual(css.status, 200)
+            self.assertIn(b".button_", css.body)
+            self.assertIn(b".active_", css.body)
+
     def test_package_css_asset_is_served_with_css_mime_type(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -234,8 +288,14 @@ class FrontendServingTests(unittest.TestCase):
             (root / "src" / "main.js").write_text('import "theme/style.css";', encoding="utf-8")
             (root / "node_modules" / "theme" / "package.json").write_text(
                 '{"name":"theme","exports":{"./style.css":"./dist/style.css"}}', encoding="utf-8")
-            (package / "style.css").write_text("body{color:blue}", encoding="utf-8")
+            (package / "style.css").write_text('@import "theme-base/reset.css";body{color:blue}', encoding="utf-8")
+            base = root / "node_modules" / "theme-base"
+            base.mkdir(parents=True)
+            (base / "package.json").write_text(
+                '{"name":"theme-base","exports":{"./reset.css":"./reset.css"}}', encoding="utf-8")
+            (base / "reset.css").write_text("*{box-sizing:border-box}", encoding="utf-8")
             frontend = FrontendDevServer(root)
+            frontend.import_map("src/main.js")
             entry = frontend.serve(Request("GET", "/__limbo/src/main.js", {}))
             self.assertEqual(entry.status, 200)
             self.assertIn(b"/__limbo/_css/node_modules/theme/dist/style.css", entry.body)
@@ -245,16 +305,21 @@ class FrontendServingTests(unittest.TestCase):
             package_css = frontend.serve(Request("GET", "/__limbo/_pkgfile/node_modules/theme/dist/style.css", {}))
             self.assertEqual(package_css.status, 200)
             self.assertIn("text/css", package_css.headers.get("Content-Type", ""))
+            self.assertIn(b"/__limbo/_pkgfile/node_modules/theme-base/reset.css", package_css.body)
 
-    def test_css_import_with_bindings_has_actionable_error(self):
+    def test_css_import_with_bindings_serves_css_module(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "src").mkdir()
             (root / "src" / "main.js").write_text('import styles from "./site.css";', encoding="utf-8")
             (root / "src" / "site.css").write_text("body{}", encoding="utf-8")
-            response = FrontendDevServer(root).serve(Request("GET", "/__limbo/src/main.js", {}))
-            self.assertEqual(response.status, 422)
-            self.assertIn(b"side-effect import", response.body)
+            frontend = FrontendDevServer(root)
+            response = frontend.serve(Request("GET", "/__limbo/src/main.js", {}))
+            self.assertEqual(response.status, 200)
+            self.assertIn(b"/_cssmodule/src/site.css", response.body)
+            module = frontend.serve(Request("GET", "/__limbo/_cssmodule/src/site.css", {}))
+            self.assertEqual(module.status, 200)
+            self.assertIn(b"export default styles", module.body)
 
     def test_wasm_asset_is_served_with_browser_mime_type(self):
         with tempfile.TemporaryDirectory() as temp:

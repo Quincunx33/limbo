@@ -198,10 +198,24 @@ class FrameworkSFCAdapter:
         compiler = FrontendCompiler(self.root)
         try:
             original = path.read_text(encoding="utf-8")
-            if re.search(r"<script\b[^>]*\blang\s*=\s*(['\"])ts\1", original):
-                code = compiler.transform(path)
-                return TransformResult(code=code, loader="js")
             code, source_map = compiler._compile_sfc_result(path)
+            if re.search(r"<script\b[^>]*\blang\s*=\s*(['\"])ts\1", original) and compiler.esbuild:
+                if source_map is not None:
+                    map_text = source_map if isinstance(source_map, str) else json.dumps(
+                        source_map, separators=(",", ":"), ensure_ascii=False
+                    )
+                    encoded = base64.b64encode(map_text.encode("utf-8")).decode("ascii")
+                    code += "\n//# sourceMappingURL=data:application/json;base64," + encoded + "\n"
+                code = compiler._esbuild_stdin(code, "tsx", path, "react", source_map=True)
+                match = re.search(r"sourceMappingURL=data:application/json;base64,([A-Za-z0-9+/=]+)", code)
+                if not match:
+                    raise AdapterError("esbuild did not return an inline source map for the TypeScript SFC")
+                try:
+                    composed_map = base64.b64decode(match.group(1), validate=True).decode("utf-8")
+                    json.loads(composed_map)
+                except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
+                    raise AdapterError("esbuild returned an invalid composed SFC source map") from exc
+                return TransformResult(code=code, loader="js", source_map=composed_map)
         except FrontendError as exc:
             raise AdapterError(str(exc)) from exc
         if source_map is None:

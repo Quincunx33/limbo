@@ -10,8 +10,8 @@ from limbo.cli import main as cli_main
 from contextlib import redirect_stdout
 from io import StringIO
 
-from limbo.frontend import DependencyGraph, FrontendError, ModuleResolver
-from limbo.frontend_scanner import scan_imports
+from limbo.frontend import DependencyGraph, ModuleResolver
+from limbo.frontend_scanner import rewrite_import_meta_hot, scan_imports
 from limbo.css_scanner import scan_css_dependencies
 from limbo.frontend_cache import TransformCache
 from limbo.frontend_engine import (
@@ -43,13 +43,21 @@ class FrontendAdapterContractTests(unittest.TestCase):
         self.assertEqual([(r.specifier, r.kind) for r in refs],
                          [("theme.css", "import"), ("../img/hero.webp", "asset")])
 
-    def test_css_graph_rejects_bare_dependencies_with_actionable_error(self):
+    def test_css_graph_resolves_bare_package_imports(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
+            package_css = root / "node_modules" / "theme-package" / "css" / "theme.css"
+            package_css.parent.mkdir(parents=True)
+            package_css.write_text("body{color:blue}", encoding="utf-8")
+            (root / "node_modules" / "theme-package" / "package.json").write_text(
+                '{"name":"theme-package","exports":{"./css/theme.css":"./css/theme.css"}}',
+                encoding="utf-8",
+            )
             (root / "main.js").write_text('import "./theme.css";', encoding="utf-8")
-            (root / "theme.css").write_text('@import "package-theme.css";', encoding="utf-8")
-            with self.assertRaisesRegex(FrontendError, "Bare CSS dependency"):
-                DependencyGraph(ModuleResolver(root)).build("main.js")
+            (root / "theme.css").write_text('@import "theme-package/css/theme.css";', encoding="utf-8")
+            graph = DependencyGraph(ModuleResolver(root))
+            edges = graph.build("main.js")
+            self.assertIn(package_css.resolve(), edges[(root / "theme.css").resolve()])
 
     def test_dependency_graph_tracks_css_and_binary_asset_edges(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -92,6 +100,28 @@ const meta = import.meta.url;
         self.assertNotIn(("string-only", "side-effect"), pairs)
         self.assertEqual(len(result.diagnostics), 1)
         self.assertIn("non-literal dynamic import", result.diagnostics[0])
+
+    def test_scanner_handles_template_interpolation_and_regex_literals(self):
+        source = r'''
+const message = `plain import("./template-text.js") ${import("./inside-template.js")}`;
+const guarded = `${/[}]/.test("}") ? import("./after-regex.js") : null}`;
+const pattern = /import\("\.\/regex-fake\.js"\)/g;
+const nested = /[{}]import\("\.\/also-fake\.js"\)/;
+'''
+        result = scan_imports(source)
+        self.assertEqual(
+            [(item.specifier, item.kind) for item in result.imports],
+            [("./inside-template.js", "dynamic"), ("./after-regex.js", "dynamic")],
+        )
+        self.assertEqual(result.diagnostics, ())
+
+    def test_hmr_rewriter_ignores_comments_and_strings(self):
+        source = 'const text="import.meta.hot"; // import.meta.hot\nimport.meta.hot.accept();'
+        rewritten = rewrite_import_meta_hot(source)
+        self.assertIn('const text="import.meta.hot"', rewritten)
+        self.assertIn('// import.meta.hot', rewritten)
+        self.assertIn("__LIMBO_HMR_HOT__(import.meta.url)", rewritten)
+        self.assertNotIn("import.meta.hot.accept", rewritten)
 
     def test_dependency_graph_uses_scanner_and_records_dynamic_imports(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -191,6 +221,25 @@ const meta = import.meta.url;
             self.assertIn("sourceMappingURL=data:application/json;base64,", result.code)
             encoded = result.code.rsplit("sourceMappingURL=data:application/json;base64,", 1)[1].strip()
             self.assertEqual(json.loads(base64.b64decode(encoded)), source_map)
+
+    def test_typescript_sfc_composes_compiler_and_esbuild_source_maps(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "Component.vue"
+            path.write_text('<script lang="ts">const value: number = 1;</script>', encoding="utf-8")
+            compiler_map = {"version": 3, "sources": ["Component.vue"], "names": [], "mappings": "AAAA"}
+            output_map = {"version": 3, "sources": ["Component.vue"], "names": [], "mappings": "AAAA"}
+            output_code = "const value = 1;\\n//# sourceMappingURL=data:application/json;base64," + base64.b64encode(
+                json.dumps(output_map).encode("utf-8")
+            ).decode("ascii")
+            adapter = FrameworkSFCAdapter(temp, "vue")
+            with patch.object(adapter, "detect", return_value=True), \
+                 patch("limbo.frontend.shutil.which", side_effect=lambda name: "esbuild" if name == "esbuild" else "node"), \
+                 patch("limbo.frontend.FrontendCompiler._compile_sfc_result", return_value=("const value: number = 1;", compiler_map)), \
+                 patch("limbo.frontend.FrontendCompiler._esbuild_stdin", return_value=output_code) as esbuild:
+                result = adapter.transform(path)
+            self.assertEqual(json.loads(result.source_map), output_map)
+            self.assertTrue(esbuild.call_args.kwargs["source_map"])
+            self.assertIn("sourceMappingURL=data:application/json;base64,", esbuild.call_args.args[0])
 
     def test_registry_rejects_duplicate_ids(self):
         with self.assertRaisesRegex(ValueError, "duplicate"):

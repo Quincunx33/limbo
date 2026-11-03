@@ -51,26 +51,27 @@ on the schema.
 ## Dependency scanning and resolution
 
 The dependency graph uses a standard-library lexical ESM scanner for static
-imports, side-effect imports, re-exports and literal dynamic imports. It ignores
-comments and ordinary quoted strings. Computed dynamic imports are reported as
-diagnostics rather than guessed.
+imports, side-effect imports, re-exports and literal dynamic imports. It handles
+template interpolations and skips common regular-expression literals, but it is
+not a JavaScript parser; computed dynamic imports and uncommon lexical edge cases
+remain unsupported and are reported rather than guessed.
 
 A separate CSS scanner detects quoted `@import` and `url()` references.
 Relative CSS imports and assets are tracked in the graph; binary assets are
-leaves and are served with MIME types inferred by Python. Bare CSS dependencies
-are rejected with an actionable diagnostic. Browser-native JavaScript
-side-effect imports of CSS are rewritten to a small JS module that adds a
-stylesheet link. Using a link preserves relative `url()` and nested CSS
-`@import` resolution. CSS imports with bindings/CSS modules are not supported.
+leaves and are served with MIME types inferred by Python. JavaScript side-effect
+imports of package CSS and bare package CSS `@import` dependencies work when the
+package path resolves through the package resolver. Side-effect imports add a
+stylesheet link. Bound CSS imports are treated as CSS modules and export a
+deterministic class map; selector rewriting is intentionally limited and does
+not yet implement the full CSS Modules composition/global syntax.
 
 The resolver supports local paths, tsconfig path aliases, package `exports`
-subpaths/patterns and conditions, and package `imports` maps. Export conditions
-are selected deterministically from the configured condition tuple (the default
-browser/import/module/default set can be overridden), and overlapping wildcard
-patterns prefer the more specific pattern. It rejects Node.js built-ins and
-package paths that escape the project root. This is not a complete Node or
-bundler-compatible resolver; unsupported conditions and syntax must not be
-assumed to work.
+subpaths/patterns and conditions, and package `imports` maps. Active conditions
+are selected in the order written in the package's condition object, and more
+specific wildcard patterns win. Null targets are rejected. Node's full fallback
+array, validation and nested-pattern semantics are not yet completely covered.
+The resolver rejects Node.js built-ins and package paths that escape the project
+root; do not assume complete Node or bundler compatibility.
 
 ## Transform cache and development reload
 
@@ -83,13 +84,20 @@ The dependency graph supports incremental invalidation and a `refresh()` rebuild
 operation; removed imports are pruned from both forward and reverse edges so
 old modules are not retained after edits.
 
-The dev server exposes a version endpoint and a small polling client. When a
-watched module or asset changes, it performs a safe full-page reload. The
-version token hashes watched file contents. The client includes an opt-in state
-bridge: applications may keep JSON-serializable data in
-`window.__LIMBO_HMR_STATE__`; it is saved before reload and restored with a
-`limbo:hmr-ready` event. This preserves app state across the safe full reload,
-but is not module-level Hot Module Replacement and does not claim HMR support.
+The dev server exposes per-module version deltas and a polling client. Modules
+may opt into accept-based updates with `import.meta.hot.accept()` or
+`import.meta.hot.accept('./dependency.js', callback)`. A module can register a
+`dispose(data => ...)` callback and use `data` to carry state into its next
+evaluation. Changed modules without a registered accept boundary still trigger
+the safe full-page reload fallback. The opt-in JSON state bridge remains
+available as `window.__LIMBO_HMR_STATE__` and emits `limbo:hmr-ready` after a
+fallback reload. Framework-specific component state preservation is not yet
+provided automatically.
+
+TypeScript-in-SFC transforms pass the SFC compiler's inline map through esbuild
+and expose esbuild's composed inline map when local esbuild is available.
+Chromium smoke fixtures cover explicit HMR updates and provide optional
+TypeScript/JSX execution checks; Vue and Svelte still need real browser fixtures.
 
 ## WebAssembly and assets
 
@@ -103,9 +111,8 @@ executes. Limbo does not provide a WASM compiler or runtime.
 ## Remaining boundaries
 
 This is an incremental local development engine, not a production bundler.
-Parser-grade JavaScript scanning (including template interpolation and
-regex-literal edge cases), arbitrary computed imports, full npm condition
-semantics, CSS modules, bare CSS imports, TypeScript-in-SFC source-map
-integration, true module-level state-preserving HMR, production optimization/
-code splitting and broad browser-level framework fixtures remain outside the
-currently verified capability set. Production build belongs to Phase 6.
+Parser-grade JavaScript scanning, arbitrary computed imports, full npm condition
+semantics, complete CSS Modules behavior, automatic framework component-state
+preservation, and real Vue/Svelte browser fixtures
+remain outside the currently verified capability set. Production optimization
+and code splitting belong to Phase 6.
