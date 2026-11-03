@@ -5,6 +5,7 @@
 - Added a private GitHub repository and green Actions coverage for Python 3.10–3.13 on Linux and Windows, plus optional frontend/compiler and Chromium browser fixtures.
 - Stabilized Windows canonical-path assertions and Chromium HMR/WASM smoke fixtures across Python versions.
 - Kept macOS explicitly unverified because the hosted runner repeatedly hung; the workflow makes no macOS support claim.
+- Added local-first buildless runtime resolution: browser ESM packages are served from project `node_modules` through generated import maps, while remote CDN/data imports are rejected by default.
 
 ## 0.9.0
 

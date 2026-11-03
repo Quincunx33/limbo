@@ -33,6 +33,17 @@ detection. Vue and Svelte adapters use the existing local SFC bridge. Their
 runtime compatibility remains experimental; JSON keeps an explicit compiler
 fallback because it is not currently a registered adapter.
 
+## Local runtime packages
+
+Buildless development is local-first by default. Bare imports are resolved from
+the project's `node_modules`, emitted into a generated import map, and served
+under `/_pkgfile/`; no CDN URL is inserted. The dev server rejects `http:`,
+`https:` and `data:` module imports unless an explicit remote-import adapter is
+selected. Install a browser-native ESM runtime locally, for example React,
+Preact, Solid or Lit, and import it by package name from the frontend source.
+CommonJS-only packages still require a local transform or bundler and are
+reported as an actionable error rather than being guessed at runtime.
+
 ## Capability manifest
 
 Run:

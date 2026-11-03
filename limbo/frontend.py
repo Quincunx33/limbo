@@ -351,9 +351,11 @@ class ModuleResolver:
 
 class DependencyGraph:
     """Cycle-safe import graph with reverse edges and dependency invalidation."""
-    def __init__(self, resolver: ModuleResolver, *, max_modules: int = 10_000) -> None:
+    def __init__(self, resolver: ModuleResolver, *, max_modules: int = 10_000,
+                 allow_remote: bool = False) -> None:
         self.resolver = resolver
         self.max_modules = max_modules
+        self.allow_remote = allow_remote
         self.edges: dict[Path, set[Path]] = {}
         self.reverse: dict[Path, set[Path]] = {}
         self.bare_imports: dict[Path, set[str]] = {}
@@ -399,6 +401,10 @@ class DependencyGraph:
                 dependencies = []
             for specifier, kind in dependencies:
                 if specifier.startswith(("http://", "https://", "data:")):
+                    if not self.allow_remote:
+                        raise FrontendError(
+                            f"Remote frontend import '{specifier}' is disabled; install the package locally in node_modules"
+                        )
                     continue
                 if current.suffix.lower() == ".css" and kind == "asset" and not specifier.startswith("/"):
                     dependency = self.resolver._resolve_path(current.parent / specifier)
@@ -558,7 +564,8 @@ class FrontendCompiler:
 
 class FrontendDevServer:
     """Serve a local source tree and compiler output under one URL prefix."""
-    def __init__(self, project_root: str | os.PathLike[str], *, url_prefix: str = "/__limbo") -> None:
+    def __init__(self, project_root: str | os.PathLike[str], *, url_prefix: str = "/__limbo",
+                 allow_remote: bool = False) -> None:
         self.root = Path(project_root).expanduser().resolve(strict=True)
         normalized_prefix = url_prefix.strip("/")
         if normalized_prefix and not re.fullmatch(r"[A-Za-z0-9/_-]+", normalized_prefix):
@@ -566,7 +573,8 @@ class FrontendDevServer:
         self.prefix = "/" + normalized_prefix
         if self.prefix == "/": raise ValueError("Frontend URL prefix cannot be root")
         self.resolver = ModuleResolver(self.root)
-        self.graph = DependencyGraph(self.resolver)
+        self.allow_remote = allow_remote
+        self.graph = DependencyGraph(self.resolver, allow_remote=allow_remote)
         self.compiler = FrontendCompiler(self.root)
         self.registry = AdapterRegistry((
             BrowserNativeAdapter(),

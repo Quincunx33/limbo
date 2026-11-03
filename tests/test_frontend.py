@@ -202,6 +202,40 @@ class FrontendServingTests(unittest.TestCase):
             missing = frontend.serve(Request("GET", "/__limbo/_importmap.json", {}))
             self.assertEqual(missing.status, 400)
 
+    def test_local_runtime_packages_are_served_without_cdn_imports(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "src").mkdir()
+            (root / "src" / "main.js").write_text(
+                'import { createElement } from "local-ui"; export const app = createElement("main");',
+                encoding="utf-8",
+            )
+            package = root / "node_modules" / "local-ui"
+            package.mkdir(parents=True)
+            (package / "package.json").write_text(
+                json.dumps({"name": "local-ui", "exports": {".": "./index.js"}}), encoding="utf-8"
+            )
+            (package / "index.js").write_text(
+                "export function createElement(tag){ return document.createElement(tag); }", encoding="utf-8"
+            )
+            frontend = FrontendDevServer(root)
+            imports = frontend.import_map("src/main.js")["imports"]
+            self.assertEqual(imports["local-ui"], "/__limbo/_pkgfile/node_modules/local-ui/index.js")
+            package_response = frontend.serve(Request("GET", imports["local-ui"], {}))
+            self.assertEqual(package_response.status, 200)
+            self.assertIn(b"createElement", package_response.body)
+
+    def test_remote_imports_are_rejected_in_local_first_mode(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "src").mkdir()
+            (root / "src" / "main.js").write_text(
+                'import "https://example.com/react.js";', encoding="utf-8"
+            )
+            frontend = FrontendDevServer(root)
+            with self.assertRaisesRegex(FrontendError, "Remote frontend import"):
+                frontend.import_map("src/main.js")
+
     def test_dev_server_emits_full_reload_fallback_and_version_endpoint(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
