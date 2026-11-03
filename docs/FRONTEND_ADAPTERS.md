@@ -50,11 +50,13 @@ on the schema.
 
 ## Dependency scanning and resolution
 
-The dependency graph uses a standard-library lexical ESM scanner for static
-imports, side-effect imports, re-exports and literal dynamic imports. It handles
-template interpolations and skips common regular-expression literals, but it is
-not a JavaScript parser; computed dynamic imports and uncommon lexical edge cases
-remain unsupported and are reported rather than guessed.
+The dependency graph uses an optional local Acorn parser for ordinary JavaScript
+when the repository/project installs the frontend tooling in `package.json`.
+Acorn provides AST-accurate static imports, side-effect imports, re-exports,
+literal dynamic imports, import attributes and source ranges. TypeScript/JSX
+continues through the local esbuild adapter before graph scanning. If Acorn or
+Node is unavailable, Limbo falls back to its standard-library lexical scanner;
+computed dynamic imports remain diagnostic-only rather than guessed.
 
 A separate CSS scanner detects quoted `@import` and `url()` references.
 Relative CSS imports and assets are tracked in the graph; binary assets are
@@ -62,8 +64,12 @@ leaves and are served with MIME types inferred by Python. JavaScript side-effect
 imports of package CSS and bare package CSS `@import` dependencies work when the
 package path resolves through the package resolver. Side-effect imports add a
 stylesheet link. Bound CSS imports are treated as CSS modules and export a
-deterministic class map; selector rewriting is intentionally limited and does
-not yet implement the full CSS Modules composition/global syntax.
+deterministic class map. Local classes/IDs, nested selectors,
+`:global`/`:local` scope markers, keyframes, animation names,
+`composes`/`compose-with`, cycle detection and composition invalidation are
+supported. `@value` is rejected with an actionable diagnostic rather than
+served as invalid CSS; this is a focused CSS Modules subset, not a complete
+PostCSS-compatible implementation.
 
 The resolver supports local paths, tsconfig path aliases, package `exports`
 subpaths/patterns and conditions, and package `imports` maps. Active conditions
@@ -111,8 +117,9 @@ executes. Limbo does not provide a WASM compiler or runtime.
 ## Remaining boundaries
 
 This is an incremental local development engine, not a production bundler.
-Parser-grade JavaScript scanning, arbitrary computed imports, full npm condition
-semantics, complete CSS Modules behavior, automatic framework component-state
-preservation, and real Vue/Svelte browser fixtures
-remain outside the currently verified capability set. Production optimization
-and code splitting belong to Phase 6.
+Parser-grade JavaScript scanning is available when optional Acorn tooling is
+installed; the dependency-free lexical fallback remains for minimal projects.
+Arbitrary computed imports, full npm condition semantics, complete PostCSS CSS
+Modules behavior and automatic framework component-state preservation remain
+outside the currently verified capability set. Production optimization and
+code splitting belong to Phase 6.

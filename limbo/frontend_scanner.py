@@ -70,6 +70,79 @@ def _v8_module_dependencies(source: str) -> tuple[str, ...] | None:
     return tuple(item for item in dependencies if isinstance(item, str))
 
 
+@lru_cache(maxsize=128)
+def _acorn_scan(source: str) -> ScanResult | None:
+    """Parse ordinary JavaScript with an installed local Acorn package.
+
+    Acorn is intentionally optional: browser-native projects still work with
+    the standard-library scanner, while projects that install the documented
+    parser receive AST-accurate module ranges and syntax diagnostics.  The
+    tiny Node bridge emits only the stable data Limbo needs and walks the AST
+    without requiring an additional AST-walk package.
+    """
+    node = shutil.which("node")
+    if not node:
+        return None
+    script = r'''
+const fs=require('fs'); let source='';
+try { require.resolve('acorn'); } catch (_) { process.stdout.write(JSON.stringify({available:false})); process.exit(0); }
+const acorn=require('acorn');
+process.stdin.setEncoding('utf8'); process.stdin.on('data', c => source += c);
+process.stdin.on('end', () => {
+  try {
+    const ast=acorn.parse(source,{ecmaVersion:'latest',sourceType:'module',locations:true,allowHashBang:true});
+    const imports=[]; const diagnostics=[];
+    const add=(node,kind) => {
+      if (!node || !node.source || node.source.type !== 'Literal' || typeof node.source.value !== 'string') return;
+      imports.push({specifier:node.source.value,kind,start:node.source.start,end:node.source.end,line:node.source.loc.start.line});
+    };
+    const walk=(node) => {
+      if (!node || typeof node !== 'object') return;
+      if (node.type==='ImportDeclaration') add(node,node.specifiers.length?'static':'side-effect');
+      else if (node.type==='ExportNamedDeclaration' || node.type==='ExportAllDeclaration') add(node,'re-export');
+      else if (node.type==='ImportExpression') {
+        if (node.source && node.source.type==='Literal' && typeof node.source.value==='string')
+          imports.push({specifier:node.source.value,kind:'dynamic',start:node.source.start,end:node.source.end,line:node.source.loc.start.line});
+        else diagnostics.push(`non-literal dynamic import at line ${node.loc.start.line} is not statically resolvable`);
+      }
+      for (const [key,value] of Object.entries(node)) {
+        if (key==='loc' || key==='start' || key==='end') continue;
+        if (Array.isArray(value)) value.forEach(walk); else if (value && typeof value==='object') walk(value);
+      }
+    };
+    walk(ast); process.stdout.write(JSON.stringify({available:true,imports,diagnostics}));
+  } catch (error) {
+    process.stdout.write(JSON.stringify({available:true,error:String(error.message),line:error.loc&&error.loc.line||1}));
+  }
+});
+'''
+    try:
+        result = subprocess.run([node, "--no-warnings", "-e", script], input=source,
+                                text=True, capture_output=True, timeout=5, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    if not payload.get("available"):
+        return None
+    if payload.get("error"):
+        # Acorn intentionally covers standard JavaScript only.  TypeScript,
+        # JSX and files using syntax outside the selected Acorn grammar fall
+        # through to Limbo's conservative scanner (and, in the dev graph,
+        # normally arrive here already transformed by esbuild).
+        return None
+    found: list[ImportReference] = []
+    seen: set[tuple[str, str]] = set()
+    for item in payload.get("imports", []):
+        ref = ImportReference(item["specifier"], item["kind"], item["start"], item["end"])
+        key = (ref.specifier, ref.kind)
+        if key not in seen:
+            found.append(ref); seen.add(key)
+    return ScanResult(tuple(found), tuple(payload.get("diagnostics", ())))
+
+
 def _template_expression_end(source: str, start: int) -> int:
     """Find a template interpolation's closing brace, skipping quoted text."""
     depth = 1
@@ -260,6 +333,9 @@ def _tokens(source: str, *, offset: int = 0, line_offset: int = 0) -> list[_Toke
 
 def scan_imports(source: str) -> ScanResult:
     """Extract supported literal ESM references without matching comments/strings."""
+    parsed = _acorn_scan(source)
+    if parsed is not None:
+        return parsed
     tokens = _tokens(source)
     found: list[ImportReference] = []
     diagnostics: list[str] = []

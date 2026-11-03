@@ -127,6 +127,19 @@ const nested = /[{}]import\("\.\/also-fake\.js"\)/;
         )
         self.assertEqual(result.diagnostics, ())
 
+    def test_parser_backed_scanner_returns_stable_literal_ranges(self):
+        source = "import value from './value.js' with { type: 'json' };\n"
+        source += "export * from './value.js';\nconst lazy = import('./lazy.js');\n"
+        result = scan_imports(source)
+        self.assertEqual(
+            [(item.specifier, item.kind) for item in result.imports],
+            [('./value.js', 'static'), ('./value.js', 're-export'), ('./lazy.js', 'dynamic')],
+        )
+        for item in result.imports:
+            literal = source[item.start:item.end]
+            self.assertIn(literal[0], "'\"")
+            self.assertEqual(literal[1:-1], item.specifier)
+
     def test_scanner_ignores_member_import_and_preserves_real_dynamic_diagnostic(self):
         source = "obj.import('./member.js'); obj?.import(name); #import(); import(name);"
         result = scan_imports(source)
