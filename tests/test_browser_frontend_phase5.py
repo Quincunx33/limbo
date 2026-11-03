@@ -223,7 +223,16 @@ class BrowserFrontendSmokeTests(unittest.TestCase):
                 encoding="utf-8",
             )
             frontend = FrontendDevServer(root)
-            page = "<!doctype html><meta charset='utf-8'><body>HMR dependency fixture</body>" + frontend.script_tag("main.js")
+            page = (
+                "<!doctype html><meta charset='utf-8'><body>HMR dependency fixture</body>"
+                + frontend.script_tag("main.js")
+                + "<script>"
+                + "(function finish(){if(document.body.dataset.hmr==='2'){"
+                + "const snapshot=document.documentElement.outerHTML;"
+                + "location.replace('data:text/html;charset=utf-8,'+encodeURIComponent(snapshot));"
+                + "}else{setTimeout(finish,100)}})();"
+                + "</script>"
+            )
             version_requests = 0
 
             class Handler(BaseHTTPRequestHandler):
