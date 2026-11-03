@@ -97,13 +97,16 @@ may opt into accept-based updates with `import.meta.hot.accept()` or
 evaluation. Changed modules without a registered accept boundary still trigger
 the safe full-page reload fallback. The opt-in JSON state bridge remains
 available as `window.__LIMBO_HMR_STATE__` and emits `limbo:hmr-ready` after a
-fallback reload. Framework-specific component state preservation is not yet
-provided automatically.
+fallback reload. Vue SFC modules register a stable component identity and use
+Vue's `__VUE_HMR_RUNTIME__.reload()` hook when the browser runtime exposes it,
+preserving component instances across accepted updates. Svelte remains on the
+generic accept/dispose or full-reload path.
 
 TypeScript-in-SFC transforms pass the SFC compiler's inline map through esbuild
 and expose esbuild's composed inline map when local esbuild is available.
 Chromium smoke fixtures cover explicit HMR updates and provide optional
-TypeScript/JSX execution checks; Vue and Svelte still need real browser fixtures.
+TypeScript/JSX/Vue/Svelte execution checks. CI installs the optional parser,
+esbuild and framework compiler packages in a dedicated frontend acceptance job.
 
 ## WebAssembly and assets
 

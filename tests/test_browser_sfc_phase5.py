@@ -17,9 +17,16 @@ from limbo.http import Request
 
 
 class BrowserSFCFixtureTests(unittest.TestCase):
+    def _project_with_local_tools(self, root: Path) -> None:
+        """Copy repository-installed optional tools into the isolated fixture."""
+        tools = Path(__file__).resolve().parents[1] / "node_modules"
+        if tools.is_dir():
+            shutil.copytree(tools, root / "node_modules", symlinks=True)
+
     def test_typescript_sfc_emits_composed_inline_source_map_with_real_tools(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1]) as temp:
             root = Path(temp)
+            self._project_with_local_tools(root)
             (root / "Component.vue").write_text(
                 "<script lang='ts'>export const answer: number = 42;</script>"
                 "<template><p>{{ answer }}</p></template>", encoding="utf-8")
@@ -40,6 +47,7 @@ class BrowserSFCFixtureTests(unittest.TestCase):
             self.skipTest("Chromium is not installed")
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1]) as temp:
             root = Path(temp)
+            self._project_with_local_tools(root)
             (root / "src").mkdir()
             compiler = FrontendCompiler(root)
             adapter = FrameworkSFCAdapter(root, framework)

@@ -32,12 +32,11 @@ if (framework === ".vue") {
       inlineTemplate: true,
       templateOptions: { scoped, compilerOptions: scoped ? { scopeId } : {} },
     });
-    code = compiled.content;
+    code = compiled.content.replace(/export\s+default\s+/, "const __limbo_sfc__ = ");
     sourceMap = compiled.map || null;
-    if (scoped) {
-      code = code.replace(/export\s+default\s+/, "const __limbo_sfc__ = ") +
-        `\n__limbo_sfc__.__scopeId=${JSON.stringify(scopeId)};\nexport default __limbo_sfc__;`;
-    }
+    code += `\n__limbo_sfc__.__hmrId=${JSON.stringify(id)};`;
+    if (scoped) code += `\n__limbo_sfc__.__scopeId=${JSON.stringify(scopeId)};`;
+    code += "\nexport default __limbo_sfc__;";
   } else {
     let script = descriptor.script ? descriptor.script.content : "const __sfc__ = {};";
     if (/export\s+default\s+/.test(script)) {
@@ -55,7 +54,7 @@ if (framework === ".vue") {
     sourceMap = template.map || null;
     if (template.errors.length) throw template.errors[0];
     const scopedSetup = scoped ? `__sfc__.__scopeId=${JSON.stringify(scopeId)};` : "";
-    code = `${script}\n${template.code}\nif(typeof __sfc__!=="undefined"){__sfc__.render=render;${scopedSetup}}\nexport default typeof __sfc__!=="undefined"?__sfc__:{render};`;
+    code = `${script}\n${template.code}\nif(typeof __sfc__!=="undefined"){__sfc__.render=render;__sfc__.__hmrId=${JSON.stringify(id)};${scopedSetup}}\nexport default typeof __sfc__!=="undefined"?__sfc__:{render};`;
   }
   const styles = descriptor.styles.map((style) => {
     if (style.module) throw new Error("Vue CSS modules are not supported by this preview adapter yet");
@@ -73,6 +72,7 @@ if (framework === ".vue") {
   // default import is the bundler build, which expects compile-time globals
   // such as `__DEV__`; use the browser runtime for compiled SFC helpers.
   code = code.replace(/from\s+(["'])vue\1/g, 'from $1vue/dist/vue.runtime.esm-browser.js$1');
+  code += `\nif(import.meta.hot)import.meta.hot.accept((mod)=>{const r=globalThis.__VUE_HMR_RUNTIME__;if(r&&mod&&mod.default)r.reload(${JSON.stringify(id)},mod.default);});\n`;
   const output = injectStyles(code, styles, id);
   process.stdout.write(process.argv.includes("--json")
     ? JSON.stringify({ code: output, sourceMap })
