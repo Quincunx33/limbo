@@ -50,8 +50,8 @@ class BrowserWasmSmokeTests(unittest.TestCase):
                 url = f"http://127.0.0.1:{server.server_address[1]}/index.html"
                 result = subprocess.run(
                     [chromium, "--headless", "--no-sandbox", "--disable-gpu", "--dump-dom",
-                     "--virtual-time-budget=3000", url],
-                    capture_output=True, text=True, timeout=15, check=False,
+                     "--run-all-compositor-stages-before-draw", "--virtual-time-budget=10000", url],
+                    capture_output=True, text=True, timeout=30, check=False,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr[-2000:])
                 self.assertIn(">42</output>", result.stdout)

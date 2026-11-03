@@ -85,7 +85,9 @@ class FrontendResolverTests(unittest.TestCase):
         nested.mkdir(parents=True)
         (nested / "package.json").write_text('{"name":"inner","module":"index.js"}', encoding="utf-8")
         (nested / "index.js").write_text("export default 1;", encoding="utf-8")
-        self.assertEqual(ModuleResolver(self.root).resolve("inner", importer).path, nested / "index.js")
+        # Windows may resolve the temporary directory through a different
+        # casing or its 8.3 short-path alias; compare canonical paths.
+        self.assertEqual(ModuleResolver(self.root).resolve("inner", importer).path, (nested / "index.js").resolve())
 
     def test_alias_cannot_escape_root(self):
         outside = self.root.parent / (self.root.name + "-outside.ts")
