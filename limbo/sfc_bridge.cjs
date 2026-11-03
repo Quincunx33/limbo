@@ -69,6 +69,10 @@ if (framework === ".vue") {
     if (result.errors.length) throw result.errors[0];
     return result.code;
   });
+  // The dev server serves ESM directly without bundling.  Vue's package
+  // default import is the bundler build, which expects compile-time globals
+  // such as `__DEV__`; use the browser runtime for compiled SFC helpers.
+  code = code.replace(/from\s+(["'])vue\1/g, 'from $1vue/dist/vue.runtime.esm-browser.js$1');
   const output = injectStyles(code, styles, id);
   process.stdout.write(process.argv.includes("--json")
     ? JSON.stringify({ code: output, sourceMap })

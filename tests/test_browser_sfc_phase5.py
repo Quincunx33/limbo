@@ -33,7 +33,8 @@ class BrowserSFCFixtureTests(unittest.TestCase):
                 (root / "src" / "App.vue").write_text(
                     "<template><p id='done'>Vue browser fixture</p></template>", encoding="utf-8")
                 (root / "src" / "main.js").write_text(
-                    "import {createApp} from 'vue';import App from './App.vue';createApp(App).mount('#app');",
+                    "import {createApp} from 'vue/dist/vue.runtime.esm-browser.js';"
+                    "import App from './App.vue';createApp(App).mount('#app');",
                     encoding="utf-8",
                 )
                 expected = "Vue browser fixture"

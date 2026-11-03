@@ -53,6 +53,34 @@ class BrowserFrontendSmokeTests(unittest.TestCase):
             self.assertNotIn("animation-name: fade;", compiled)
             self.assertRegex(compiled, r"@keyframes fade_[0-9a-f]{7}")
 
+    def test_css_modules_composes_local_and_imported_classes_and_updates_graph(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base = root / "base.css"
+            entry = root / "entry.css"
+            main = root / "main.js"
+            base.write_text(".base { color: blue; }", encoding="utf-8")
+            entry.write_text(
+                ".local { composes: base from './base.css'; color: red; }\n"
+                ".combined { composes: local; }\n", encoding="utf-8")
+            main.write_text("import styles from './entry.css'; console.log(styles);", encoding="utf-8")
+            frontend = FrontendDevServer(root)
+            classes, compiled = frontend._compile_css_module(entry)
+            self.assertIn(classes["local"], classes["combined"])
+            self.assertIn("base_", classes["local"])
+            self.assertNotIn("composes:", compiled)
+            graph = frontend.graph.build("main.js", transform=frontend._source_for_graph)
+            self.assertIn(base.resolve(), graph[entry.resolve()])
+
+    def test_css_modules_value_reports_actionable_unsupported_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            css = root / "values.css"
+            css.write_text("@value primary: red; .button { color: primary; }", encoding="utf-8")
+            frontend = FrontendDevServer(root)
+            with self.assertRaisesRegex(Exception, r"CSS Modules @value is not supported"):
+                frontend._compile_css_module(css)
+
     def test_typescript_and_jsx_modules_execute_in_chromium(self):
         chromium = shutil.which("chromium") or shutil.which("chromium-browser") or shutil.which("google-chrome")
         if not chromium:

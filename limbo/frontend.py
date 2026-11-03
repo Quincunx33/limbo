@@ -128,6 +128,11 @@ class ModuleResolver:
             except (OSError, json.JSONDecodeError) as exc:
                 raise FrontendError(f"Invalid package imports map: {manifest_path}") from exc
             imports = manifest.get("imports", {})
+            if not isinstance(imports, dict) or any(
+                not isinstance(key, str) or not key.startswith("#") or key.count("*") > 1
+                for key in imports
+            ):
+                raise FrontendError(f"Invalid package imports map: {manifest_path}")
             target_value = imports.get(specifier) if isinstance(imports, dict) else None
             if target_value is None and isinstance(imports, dict):
                 patterns = sorted(
@@ -274,7 +279,18 @@ class ModuleResolver:
             return candidates
         if not isinstance(exports, dict):
             return []
-        subpath_map = any(str(key).startswith(".") for key in exports)
+        keys = list(exports)
+        if any(not isinstance(key, str) for key in keys):
+            raise FrontendError("Package exports keys must be strings")
+        subpath_keys = [key for key in keys if key.startswith(".")]
+        condition_keys = [key for key in keys if not key.startswith(".")]
+        if subpath_keys and condition_keys:
+            raise FrontendError("Package exports cannot mix subpath and condition keys")
+        if any(not key.startswith("./") and key != "." for key in subpath_keys):
+            raise FrontendError("Package exports subpaths must start with './'")
+        if any(key.count("*") > 1 for key in subpath_keys):
+            raise FrontendError("Package exports patterns may contain only one '*'")
+        subpath_map = bool(subpath_keys)
         if subpath_map:
             if subpath in exports:
                 return self._conditional_candidates(exports[subpath])
@@ -365,6 +381,11 @@ class DependencyGraph:
             if current.suffix.lower() == ".css":
                 references = scan_css_dependencies(source)
                 dependencies = [(item.specifier, item.kind) for item in references]
+                composition_dependencies = re.findall(
+                    r"(?:composes|compose-with)\s*:[^;{}]*?\s+from\s+[\"']([^\"']+)[\"']",
+                    source,
+                )
+                dependencies.extend((specifier, "composition") for specifier in composition_dependencies)
                 self.diagnostics[current] = ()
             elif current.suffix.lower() in GRAPH_SOURCE_EXTENSIONS:
                 try:
@@ -770,17 +791,49 @@ poll();setInterval(poll,1200);
             code = code[:start] + replacement + code[end:]
         return rewrite_import_meta_hot(code)
 
-    def _compile_css_module(self, path: Path) -> tuple[dict[str, str], str]:
+    def _compile_css_module(self, path: Path, _stack: tuple[Path, ...] = ()) -> tuple[dict[str, str], str]:
         try:
             source = path.read_text(encoding="utf-8")
         except (OSError, UnicodeError) as exc:
             raise FrontendError(f"Cannot read CSS module {path.name}: {exc}") from exc
+        path = path.resolve()
+        if path in _stack:
+            chain = " -> ".join(item.name for item in (*_stack, path))
+            raise FrontendError(f"CSS Modules composition cycle: {chain}")
+        if re.search(r"(?m)^\s*@value\b", source):
+            raise FrontendError(
+                f"CSS Modules @value is not supported in {path.name}; use CSS custom properties or JavaScript exports"
+            )
         relative = path.relative_to(self.root).as_posix()
         classes: dict[str, str] = {}
         ids: dict[str, str] = {}
         animations: dict[str, str] = {}
         class_pattern = re.compile(r"(?<![\w-])\.([A-Za-z_][\w-]*)")
         id_pattern = re.compile(r"(?<![\w-])#([A-Za-z_][\w-]*)")
+
+        composition_pattern = re.compile(
+            r"(?m)(?:^|[;{])\s*(?:composes|compose-with)\s*:\s*"
+            r"(?P<names>[A-Za-z_][\w-]*(?:\s+[A-Za-z_][\w-]*)*)"
+            r"(?:\s+from\s+(?P<source>['\"][^'\"]+['\"]))?\s*;"
+        )
+
+        # Capture the selector immediately preceding each composition block,
+        # then remove only the declaration (not surrounding CSS whitespace).
+        declaration_records: list[tuple[str, tuple[str, ...], str | None]] = []
+        def remove_composition(match: re.Match[str]) -> str:
+            before = source[:match.start()]
+            owner = ""
+            owner_match = re.search(r"\.([A-Za-z_][\w-]*)\s*$", before)
+            if owner_match:
+                owner = owner_match.group(1)
+            source_specifier = match.group("source")
+            if source_specifier:
+                source_specifier = source_specifier[1:-1]
+            declaration_records.append((owner, tuple(match.group("names").split()), source_specifier))
+            delimiter = source[match.start()]
+            return delimiter if delimiter in "{;" else ""
+
+        source = composition_pattern.sub(remove_composition, source)
 
         def rewrite_selector(selector: str) -> str:
             if selector.lstrip().startswith("@"):
@@ -901,6 +954,35 @@ poll();setInterval(poll,1200);
 
         source = re.sub(r"(\banimation(?:-name)?\s*:\s*)([^;{}]+)", rewrite_animation_value, source,
                         flags=re.IGNORECASE)
+
+        # Apply composition after local names are known.  Composed values are
+        # exported through the same default `styles` object; composition
+        # declarations never reach the browser as invalid CSS.
+        for owner, names, source_specifier in declaration_records:
+            if not owner or owner not in classes:
+                raise FrontendError(f"CSS Modules composition has no local owner in {path.name}")
+            composed: list[str] = []
+            if source_specifier == "global":
+                composed.extend(names)
+            elif source_specifier:
+                try:
+                    dependency = self.resolver.resolve(source_specifier, path).path
+                except FrontendError as exc:
+                    raise FrontendError(f"Cannot resolve composed CSS module '{source_specifier}' from {path.name}: {exc}") from exc
+                if dependency.suffix.lower() != ".css":
+                    raise FrontendError(f"CSS Modules composition source must be CSS: {source_specifier}")
+                self._allowed_modules.add(dependency)
+                imported_classes, _ = self._compile_css_module(dependency, (*_stack, path))
+                for name in names:
+                    if name not in imported_classes:
+                        raise FrontendError(f"CSS Modules class '{name}' is not exported by {source_specifier}")
+                    composed.append(imported_classes[name])
+            else:
+                for name in names:
+                    if name not in classes:
+                        raise FrontendError(f"CSS Modules class '{name}' is not defined in {path.name}")
+                    composed.append(classes[name])
+            classes[owner] = " ".join(dict.fromkeys((classes[owner], *composed)))
 
         return classes, source
 
