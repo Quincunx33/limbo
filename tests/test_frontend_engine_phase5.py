@@ -115,6 +115,25 @@ const nested = /[{}]import\("\.\/also-fake\.js"\)/;
         )
         self.assertEqual(result.diagnostics, ())
 
+    def test_scanner_handles_hashbang_import_attributes_and_method_named_import(self):
+        source = "#! /usr/bin/env node\n"
+        source += "class Loader { import() {} }\n"
+        source += "import data from './data.json' with { type: 'json' };\n"
+        source += "const lazy = import('./lazy.js', { with: { type: 'js' } });\n"
+        result = scan_imports(source)
+        self.assertEqual(
+            [(item.specifier, item.kind) for item in result.imports],
+            [('./data.json', 'static'), ('./lazy.js', 'dynamic')],
+        )
+        self.assertEqual(result.diagnostics, ())
+
+    def test_scanner_ignores_member_import_and_preserves_real_dynamic_diagnostic(self):
+        source = "obj.import('./member.js'); obj?.import(name); #import(); import(name);"
+        result = scan_imports(source)
+        self.assertEqual([(item.specifier, item.kind) for item in result.imports], [])
+        self.assertEqual(len(result.diagnostics), 1)
+        self.assertIn('non-literal dynamic import', result.diagnostics[0])
+
     def test_hmr_rewriter_ignores_comments_and_strings(self):
         source = 'const text="import.meta.hot"; // import.meta.hot\nimport.meta.hot.accept();'
         rewritten = rewrite_import_meta_hot(source)

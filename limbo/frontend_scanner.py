@@ -140,6 +140,10 @@ def _tokens(source: str, *, offset: int = 0, line_offset: int = 0) -> list[_Toke
     length = len(source)
     while i < length:
         char = source[i]
+        if i == 0 and source.startswith("#!"):
+            end = source.find("\n", i + 2)
+            i = length if end < 0 else end
+            continue
         if char in " \t\r\f":
             i += 1
             continue
@@ -263,7 +267,7 @@ def scan_imports(source: str) -> ScanResult:
     for index, token in enumerate(tokens):
         if token.kind != "identifier" or token.value not in {"import", "export"}:
             continue
-        if index and tokens[index - 1].value in {".", "?."}:
+        if index and tokens[index - 1].value in {".", "?.", "#"}:
             continue
         next_index = index + 1
         if next_index >= len(tokens):
@@ -273,6 +277,13 @@ def scan_imports(source: str) -> ScanResult:
             if next_token.value == ".":
                 continue
             if next_token.value == "(":
+                # `import` can also be an ordinary method name in a class or
+                # object.  A zero-argument method (`import() {}`) is the most
+                # common ambiguous form; do not report it as a dynamic import.
+                if (next_index + 2 < len(tokens) and tokens[next_index + 1].value == ")"
+                        and next_index + 2 < len(tokens)
+                        and tokens[next_index + 2].value == "{"):
+                    continue
                 if (next_index + 2 < len(tokens) and tokens[next_index + 1].kind == "string"
                         and tokens[next_index + 2].value in {")", ","}):
                     literal = tokens[next_index + 1]

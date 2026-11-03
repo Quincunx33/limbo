@@ -777,7 +777,10 @@ poll();setInterval(poll,1200);
             raise FrontendError(f"Cannot read CSS module {path.name}: {exc}") from exc
         relative = path.relative_to(self.root).as_posix()
         classes: dict[str, str] = {}
+        ids: dict[str, str] = {}
+        animations: dict[str, str] = {}
         class_pattern = re.compile(r"(?<![\w-])\.([A-Za-z_][\w-]*)")
+        id_pattern = re.compile(r"(?<![\w-])#([A-Za-z_][\w-]*)")
 
         def rewrite_selector(selector: str) -> str:
             if selector.lstrip().startswith("@"):
@@ -795,9 +798,13 @@ poll();setInterval(poll,1200);
             selector = re.sub(r"/\*[\s\S]*?\*/", lambda match: hide(match.group(0)), selector)
 
             def hide_global(match: re.Match[str]) -> str:
-                return hide(match.group(0))
+                return hide(match.group(1))
 
             selector = re.sub(r":global\(([^()]*)\)", hide_global, selector)
+            selector = re.sub(r":global\s+([^,\s>{]+)", hide_global, selector)
+            # :local(...) is a scope marker, not part of the emitted CSS.
+            selector = re.sub(r":local\(([^()]*)\)", r"\1", selector)
+            selector = re.sub(r":local\s+", "", selector)
 
             def rename(class_match: re.Match[str]) -> str:
                 name = class_match.group(1)
@@ -809,6 +816,17 @@ poll();setInterval(poll,1200);
                 return "." + renamed
 
             rewritten = class_pattern.sub(rename, selector)
+
+            def rename_id(id_match: re.Match[str]) -> str:
+                name = id_match.group(1)
+                renamed = ids.get(name)
+                if renamed is None:
+                    digest = hashlib.sha256(f"{relative}:id:{name}".encode("utf-8")).hexdigest()[:7]
+                    renamed = f"{name}_{digest}"
+                    ids[name] = renamed
+                return "#" + renamed
+
+            rewritten = id_pattern.sub(rename_id, rewritten)
             for index, value in enumerate(hidden):
                 rewritten = rewritten.replace(f"\x00GLOBAL{index}\x00", value)
             return rewritten
@@ -853,6 +871,36 @@ poll();setInterval(poll,1200);
 
         for start, end, replacement in reversed(replacements):
             source = source[:start] + replacement + source[end:]
+
+        def animation_name(name: str) -> str:
+            renamed = animations.get(name)
+            if renamed is None:
+                digest = hashlib.sha256(f"{relative}:animation:{name}".encode("utf-8")).hexdigest()[:7]
+                renamed = f"{name}_{digest}"
+                animations[name] = renamed
+            return renamed
+
+        # Keyframe names are a separate namespace from classes.  Rewrite the
+        # declaration name and the identifiers in animation/animation-name
+        # values, while leaving timing keywords, durations and CSS variables
+        # untouched.  Global keyframe escapes remain global.
+        keyframe_pattern = re.compile(r"(@(?:-webkit-)?keyframes\s+)([A-Za-z_][\w-]*)")
+        source = keyframe_pattern.sub(lambda match: match.group(1) + animation_name(match.group(2)), source)
+
+        def rewrite_animation_value(match: re.Match[str]) -> str:
+            prefix, value = match.group(1), match.group(2)
+            keywords = {"none", "initial", "inherit", "unset", "revert", "revert-layer", "linear", "ease",
+                        "ease-in", "ease-out", "ease-in-out", "step-start", "step-end", "infinite", "normal",
+                        "reverse", "alternate", "alternate-reverse", "forwards", "backwards", "both", "running", "paused"}
+            parts = re.split(r"(\s+|,)", value)
+            for index, part in enumerate(parts):
+                if (part and not part.isspace() and part != "," and part in animations
+                        and part.lower() not in keywords and not part.startswith("--")):
+                    parts[index] = animations[part]
+            return prefix + "".join(parts)
+
+        source = re.sub(r"(\banimation(?:-name)?\s*:\s*)([^;{}]+)", rewrite_animation_value, source,
+                        flags=re.IGNORECASE)
 
         return classes, source
 

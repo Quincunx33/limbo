@@ -28,11 +28,30 @@ class BrowserFrontendSmokeTests(unittest.TestCase):
             frontend = FrontendDevServer(root)
             classes, compiled = frontend._compile_css_module(css)
             self.assertEqual(set(classes), {"local", "other", "nested"})
-            self.assertIn(":global(.vendor)", compiled)
+            self.assertIn(".vendor .local_", compiled)
             self.assertNotIn(".local ", compiled)
             self.assertNotIn(".other ", compiled)
             self.assertNotIn(".nested:hover", compiled)
             self.assertIn(".comment must stay unchanged", compiled)
+
+    def test_css_modules_scope_ids_and_keyframes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            css = root / "motion.css"
+            css.write_text(
+                ":local(.card) #hero { animation: fade 1s ease-in; }\n"
+                "@keyframes fade { from { opacity: 0; } to { opacity: 1; } }\n"
+                ":global(.vendor) :local .child { animation-name: fade; }\n",
+                encoding="utf-8",
+            )
+            classes, compiled = FrontendDevServer(root)._compile_css_module(css)
+            self.assertEqual(set(classes), {"card", "child"})
+            self.assertIn("#hero_", compiled)
+            self.assertNotIn(":local", compiled)
+            self.assertIn(".vendor .child_", compiled)
+            self.assertNotIn("animation: fade 1s", compiled)
+            self.assertNotIn("animation-name: fade;", compiled)
+            self.assertRegex(compiled, r"@keyframes fade_[0-9a-f]{7}")
 
     def test_typescript_and_jsx_modules_execute_in_chromium(self):
         chromium = shutil.which("chromium") or shutil.which("chromium-browser") or shutil.which("google-chrome")
