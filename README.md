@@ -7,7 +7,7 @@
 ## Quick start
 
 ```bash
-python -m pip install -e .
+python -m pip install limbo33
 limbo create hello-limbo
 cd hello-limbo
 limbo dev

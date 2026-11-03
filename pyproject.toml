@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "limbo-framework"
+name = "limbo33"
 version = "0.9.0"
 description = "A Python-first, zero-dependency local full-stack framework"
 readme = "README.md"
