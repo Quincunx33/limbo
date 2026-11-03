@@ -35,6 +35,11 @@ class BrowserWasmSmokeTests(unittest.TestCase):
   const {instance} = await WebAssembly.instantiate(bytes);
   document.querySelector('#result').textContent = String(instance.exports.answer());
 })().catch(error => { document.querySelector('#result').textContent = 'error:' + error; });
+</script><script>
+(function finish(){if(document.querySelector('#result').textContent==='42'){
+  const snapshot=document.documentElement.outerHTML;
+  location.replace('data:text/html;charset=utf-8,'+encodeURIComponent(snapshot));
+}else{setTimeout(finish,100)}})();
 </script>""",
                 encoding="utf-8",
             )
