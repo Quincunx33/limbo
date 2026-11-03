@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -16,6 +17,23 @@ from limbo.http import Request
 
 
 class BrowserSFCFixtureTests(unittest.TestCase):
+    def test_typescript_sfc_emits_composed_inline_source_map_with_real_tools(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1]) as temp:
+            root = Path(temp)
+            (root / "Component.vue").write_text(
+                "<script lang='ts'>export const answer: number = 42;</script>"
+                "<template><p>{{ answer }}</p></template>", encoding="utf-8")
+            compiler = FrontendCompiler(root)
+            adapter = FrameworkSFCAdapter(root, "vue")
+            if not adapter.detect() or not compiler.esbuild:
+                self.skipTest("Local Vue compiler and esbuild are required")
+            result = adapter.transform(root / "Component.vue")
+            self.assertIsNotNone(result.source_map)
+            payload = json.loads(result.source_map)
+            self.assertEqual(payload.get("version"), 3)
+            self.assertTrue(payload.get("sources"))
+            self.assertIn("sourceMappingURL=data:application/json;base64,", result.code)
+
     def _smoke(self, framework: str) -> None:
         chromium = shutil.which("chromium") or shutil.which("chromium-browser") or shutil.which("google-chrome")
         if not chromium:
