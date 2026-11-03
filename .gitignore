@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.dist/
+build/
+node_modules/
+.venv/
+venv/
+.coverage
+.limbo/

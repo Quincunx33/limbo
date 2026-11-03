@@ -1,0 +1,11 @@
+{
+  "name": "limbo-vue-preview",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@vue/compiler-sfc": "^3.5.0"
+  }
+}

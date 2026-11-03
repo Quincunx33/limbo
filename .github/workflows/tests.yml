@@ -1,0 +1,94 @@
+name: Tests
+
+on:
+  push:
+    branches: ["main", "engineering/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install Python 3.10 TOML compatibility parser
+        if: matrix.python-version == '3.10'
+        run: python -m pip install tomli
+      - name: Verify core imports without optional tools
+        run: python -c "import limbo; print(limbo.__version__)"
+      - name: Compile Python sources
+        run: python -m compileall -q limbo tests
+      - name: Run standard-library test suite
+        run: python -m unittest discover -s tests -v
+
+  platform-smoke:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify imports and compile
+        run: |
+          python -c "import limbo; print(limbo.__version__)"
+          python -m compileall -q limbo tests
+      - name: Run Phase 2 static and middleware tests
+        shell: bash
+        run: |
+          python -m unittest discover -s tests -p "test_static_phase2.py" -v
+          python -m unittest discover -s tests -p "test_middleware_phase2.py" -v
+          python -m unittest discover -s tests -p "test_phase2_hardening.py" -v
+      - name: Run Phase 3 backend lifecycle tests
+        shell: bash
+        run: |
+          python -m unittest discover -s tests -p "test_*phase3.py" -v
+          python -m unittest discover -s tests -p "test_streaming_uploads.py" -v
+      - name: Run Phase 5 frontend adapter contract tests
+        shell: bash
+        run: |
+          python -m unittest discover -s tests -p "test_frontend_engine_phase5.py" -v
+          python -m unittest discover -s tests -p "test_frontend.py" -v
+      - name: Run Phase 4 configuration and CLI tests
+        shell: bash
+        run: |
+          python -m unittest discover -s tests -p "test_config_phase4.py" -v
+          python -m unittest discover -s tests -p "test_project_cli_phase4.py" -v
+          python -m unittest discover -s tests -p "test_starter_templates_phase4.py" -v
+          python -m unittest discover -s tests -p "test_cli_phase4.py" -v
+
+  frontend-optional-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install optional parser and local framework tools
+        run: npm install --no-save acorn esbuild vue @vue/compiler-sfc svelte
+      - name: Install Chromium for browser fixtures
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium
+      - name: Run frontend parser, SFC and browser acceptance tests
+        shell: bash
+        run: |
+          python -m pip install pytest
+          python -m pytest -q tests/test_frontend_engine_phase5.py tests/test_frontend.py tests/test_browser_frontend_phase5.py tests/test_browser_sfc_phase5.py tests/test_browser_wasm_phase5.py
