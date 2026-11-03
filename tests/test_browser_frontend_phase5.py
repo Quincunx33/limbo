@@ -15,6 +15,25 @@ from limbo.http import Request
 
 
 class BrowserFrontendSmokeTests(unittest.TestCase):
+    def test_css_modules_rewrite_nested_selectors_and_preserve_global_classes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            css = root / "styles.css"
+            css.write_text(
+                "/* .comment must stay unchanged */\n"
+                ":global(.vendor) .local, .other { color: red; }\n"
+                "@media (min-width: 1px) { .nested:hover { color: blue; } }\n",
+                encoding="utf-8",
+            )
+            frontend = FrontendDevServer(root)
+            classes, compiled = frontend._compile_css_module(css)
+            self.assertEqual(set(classes), {"local", "other", "nested"})
+            self.assertIn(":global(.vendor)", compiled)
+            self.assertNotIn(".local ", compiled)
+            self.assertNotIn(".other ", compiled)
+            self.assertNotIn(".nested:hover", compiled)
+            self.assertIn(".comment must stay unchanged", compiled)
+
     def test_typescript_and_jsx_modules_execute_in_chromium(self):
         chromium = shutil.which("chromium") or shutil.which("chromium-browser") or shutil.which("google-chrome")
         if not chromium:

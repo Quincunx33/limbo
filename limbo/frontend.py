@@ -777,13 +777,28 @@ poll();setInterval(poll,1200);
             raise FrontendError(f"Cannot read CSS module {path.name}: {exc}") from exc
         relative = path.relative_to(self.root).as_posix()
         classes: dict[str, str] = {}
-        selector_pattern = re.compile(r"([^{}]+)(\{)")
         class_pattern = re.compile(r"(?<![\w-])\.([A-Za-z_][\w-]*)")
 
-        def replace_selector(match: re.Match[str]) -> str:
-            selector = match.group(1)
+        def rewrite_selector(selector: str) -> str:
             if selector.lstrip().startswith("@"):
-                return match.group(0)
+                return selector
+
+            # Hide comments and CSS Modules' :global(...) escapes before local
+            # class substitution, then restore them verbatim.  This prevents a
+            # comment such as ``/* .not-a-class */`` from becoming an export.
+            hidden: list[str] = []
+
+            def hide(value: str) -> str:
+                hidden.append(value)
+                return f"\x00GLOBAL{len(hidden) - 1}\x00"
+
+            selector = re.sub(r"/\*[\s\S]*?\*/", lambda match: hide(match.group(0)), selector)
+
+            def hide_global(match: re.Match[str]) -> str:
+                return hide(match.group(0))
+
+            selector = re.sub(r":global\(([^()]*)\)", hide_global, selector)
+
             def rename(class_match: re.Match[str]) -> str:
                 name = class_match.group(1)
                 renamed = classes.get(name)
@@ -792,9 +807,54 @@ poll();setInterval(poll,1200);
                     renamed = f"{name}_{digest}"
                     classes[name] = renamed
                 return "." + renamed
-            return class_pattern.sub(rename, selector) + match.group(2)
 
-        return classes, selector_pattern.sub(replace_selector, source)
+            rewritten = class_pattern.sub(rename, selector)
+            for index, value in enumerate(hidden):
+                rewritten = rewritten.replace(f"\x00GLOBAL{index}\x00", value)
+            return rewritten
+
+        # Rewrite only selector preludes.  A regex over the whole stylesheet
+        # can accidentally consume comments or miss selectors nested in
+        # @media/@supports blocks.  This small brace-aware pass is not a CSS
+        # parser, but it respects comments/strings and visits nested rules.
+        replacements: list[tuple[int, int, str]] = []
+        segment_start = 0
+        i = 0
+        quote: str | None = None
+        while i < len(source):
+            if source.startswith("/*", i):
+                end = source.find("*/", i + 2)
+                i = len(source) if end < 0 else end + 2
+                continue
+            char = source[i]
+            if quote:
+                if char == "\\":
+                    i += 2
+                    continue
+                if char == quote:
+                    quote = None
+                i += 1
+                continue
+            if char in ("'", '"'):
+                quote = char
+                i += 1
+                continue
+            if char == "{":
+                selector = source[segment_start:i]
+                stripped = selector.lstrip()
+                if stripped and not stripped.startswith("@"):
+                    rewritten = rewrite_selector(selector)
+                    if rewritten != selector:
+                        replacements.append((segment_start, i, rewritten))
+                segment_start = i + 1
+            elif char == "}" or char == ";":
+                segment_start = i + 1
+            i += 1
+
+        for start, end, replacement in reversed(replacements):
+            source = source[:start] + replacement + source[end:]
+
+        return classes, source
 
     def _rewrite_css_imports(self, source: str, importer: Path) -> str:
         replacements: list[tuple[int, int, str]] = []
