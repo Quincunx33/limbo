@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/status-BETA-orange" alt="Beta status" />
+  <img src="https://img.shields.io/badge/RELEASE-BETA-orange?style=for-the-badge" alt="BETA release" />
   <img src="https://img.shields.io/badge/version-0.9.0-blue" alt="Version 0.9.0" />
   <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+" />
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" />
@@ -23,7 +23,9 @@
 ---
 
 > [!WARNING]
-> **Limbo is currently in BETA (0.9.0).** It is actively evolving and is not a stable 1.0 release. Some roadmap phases are still open, and some integrations are experimental, incomplete, or unsupported. APIs and behavior may change. Do not assume production readiness; review the status, capability matrix, and security notes before deployment.
+> **BETA RELEASE — Limbo 0.9.0**
+>
+> Limbo is under active development and is **not a stable 1.0 release**. Features, APIs, and behavior may change without a compatibility guarantee. Some roadmap phases remain open, and some integrations are experimental or unsupported. Use it for evaluation and testing; do not assume production readiness. Review the status, capability matrix, threat model, and release checklist before deployment.
 
 ## What is Limbo?
 
@@ -53,7 +55,7 @@ limbo info
 limbo doctor
 ```
 
-If the package is not yet available from your configured package index, install the repository in editable mode from its root:
+For local development from a cloned repository, install the project in editable mode from its root:
 
 ```bash
 python -m pip install -e .
