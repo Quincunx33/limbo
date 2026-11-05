@@ -1,19 +1,57 @@
 # Limbo
 
-**A Python-first, local-first full-stack framework.** The core package has no required third-party runtime dependencies and includes a threaded HTTP/1.1 server. Current version: 0.9.0.
+<p align="center">
+  <strong>A Python-first web framework with a browser-native frontend toolchain.</strong>
+  <br />
+  Build APIs, serve web apps, manage local frontend assets, and ship browser-native builds — without adding a third-party runtime dependency to Limbo's core.
+</p>
 
-> 0.9.0 finishes the engineering slices in the roadmap. It is not a 1.0 release. No independent security review has been done, and this tree was not signed off on Windows or macOS. Do not expose it to untrusted public traffic.
+<p align="center">
+  <a href="https://github.com/Quincunx33/limbo">Repository</a> ·
+  <a href="docs/STATUS.md">Roadmap status</a> ·
+  <a href="docs/CAPABILITY_MATRIX.md">Capability matrix</a> ·
+  <a href="docs/THREAT_MODEL.md">Threat model</a>
+</p>
 
-## Quick start
+---
+
+## What is Limbo?
+
+Limbo is a Python-first, local-first framework foundation for building HTTP applications and browser-based projects. Its core uses Python's standard library: no Flask, FastAPI, Django, Starlette, or external application server is required.
+
+The project combines a small HTTP server and routing layer with practical backend building blocks, local frontend module tooling, and a production build path for supported browser-native projects.
+
+**Current release:** `0.9.0` · **Python:** `3.10+` · **License:** MIT
+
+> **Project status:** Limbo is an early-stage framework, not a declared 1.0 release. Some integrations are optional or experimental, and several popular frontend frameworks are not currently supported. Review the capability matrix and security notes before choosing it for a deployment.
+
+## Install
+
+The published Python distribution name is **`limbo33`**. The import package and command-line executable are named **`limbo`**.
 
 ```bash
 python -m pip install limbo33
+```
+
+Verify the installation:
+
+```bash
+limbo info
+```
+
+## Quick start
+
+Create a starter project:
+
+```bash
 limbo create hello-limbo
 cd hello-limbo
 limbo dev
 ```
 
-Open `http://127.0.0.1:8000`. Python 3.10+ required. Or create `app.py`:
+Open **http://127.0.0.1:8000**.
+
+Or create an application manually:
 
 ```python
 from limbo import Limbo
@@ -21,115 +59,184 @@ from limbo import Limbo
 app = Limbo()
 
 @app.get("/")
-def home(req):
-    return app.html("<h1>Hello Limbo</h1>")
+def home(request):
+    return app.html("<h1>Hello from Limbo</h1>")
 
 @app.get("/api/users/{user_id}")
-def user(req):
-    return {"user_id": req.path_params["user_id"]}
+def get_user(request):
+    return {"user_id": request.path_params["user_id"]}
 
-app.run(port=8000)
+@app.post("/api/echo")
+def echo(request):
+    return {"received": request.json()}
+
+if __name__ == "__main__":
+    app.run(host="127.0.0.1", port=8000)
 ```
 
-## Currently implemented
+Run it:
 
-- Decorator routes for GET, POST, PUT, PATCH and DELETE; dynamic `{parameter}` segments; duplicate route detection; 404/405 responses; automatic HEAD fallback and OPTIONS for matching paths.
-- Request properties for path, query parameters, headers, cookies, JSON and URL-encoded form data.
-- JSON, text, HTML, redirects, byte/file responses and iterable streaming responses.
-- Direct TCP server, concurrent client threads, HTTP/1.0 and HTTP/1.1 request parsing, bounded headers/body, Content-Length and chunked request bodies, keep-alive, HEAD response body suppression, and clean connection close.
-- Ordered onion-style middleware.
-- Static file mounts with traversal containment, ETag, Last-Modified, cache headers, If-None-Match and single byte-range responses.
-- Escaped `string.Template` HTML rendering; incremental multipart parsing directly from the socket into request-scoped temporary files with body/file/field quotas; safe upload names, exclusive no-overwrite persistence and chunked file writes; streamed file responses; and a small serialized-connection SQLite helper with rollback-capable transactions.
-- Password hashing with `hashlib.scrypt`, constant-time verification, HMAC-signed expiring stateless session tokens, secure cookie formatting helpers, and optional bounded server-side in-memory sessions with ID rotation/revocation.
-- Basic RFC 6455 WebSocket upgrade, masked client frame validation, text/binary messages, continuation frames, ping/pong, close handling and message-size limits; optional exact per-route Origin allowlists.
-- Local frontend module preview with safe project-contained resolution, `tsconfig.json` path aliases, package `exports`/`imports` conditional resolution, browser import maps, dependency graph traversal and invalidation. Hidden files and unapproved asset types are not served.
-- Optional esbuild transform for TypeScript/JSX/TSX; optional Vue SFC and Svelte SFC compilers run locally through Node.js. Vue/Svelte outputs are served as modules with generated styles attached. Tools are detected, never installed by Limbo.
-- `limbo create` starter templates (`python-api`, `static`, `browser-native`, `vue`), `dev`, `dev --public`, `start`, `build`, `preview`, `doctor`, `tunnel preflight`, `config validate`, `info`, `dependencies`, and safe `add`/`remove` package metadata edits. `limbo build` emits a reproducible browser-native `dist/` with a manifest. It does not install compilers, minify without a local esbuild, or claim code splitting.
-
-- Signed double-submit CSRF middleware for browser requests, including header and URL-encoded form tokens.
-- Bounded local background task execution with cancellation, error reporting, and graceful shutdown; synchronous application startup/shutdown hooks.
-- Request convenience accessors for headers, query/path parameters, cookies, forms and files, plus JSON type validation with HTTP 400/422 errors.
-
-Phase 3 is engineering-complete on the supported local Python path. Its request, upload, session, CSRF, authentication-hook, WebSocket-policy, background-task and lifecycle paths are covered by focused integration and failure-path tests. This is not a production security certification, durable job queue, distributed session store or cross-platform CI claim.
-
-## Phase 4 configuration and CLI (in progress)\n\nLimbo loads typed TOML sections for app, server, frontend, build, static, security, database and tunnel. Unknown sections/keys, wrong types and invalid ranges are rejected. `limbo dev` and `limbo start` read server host and port. Environment overrides use supported `LIMBO_` variables; CLI `--host`/`--port` take precedence. Order: CLI > environment > TOML > safe defaults. Python 3.11+ uses `tomllib`; Python 3.10 requires optional `tomli`.\n\n`limbo config validate` checks the file and prints each configured value's source without printing values. `limbo preview` serves an existing build directory. `limbo add` and `limbo remove` edit `package.json` declarations only; they never invoke npm or download packages. `limbo create NAME --template ...` supports `python-api`, `static`, `browser-native` and `vue` starters. The production `limbo build` pipeline is intentionally deferred to Phase 6 and currently exits with an explicit not-implemented message; no placeholder build output is produced.\n\n## Phase 3 backend building blocks (experimental)
-
-Session middleware stores session data on the server and sends only a random opaque ID in an HttpOnly cookie. The built-in SessionStore is bounded and process-local: sessions are lost on restart and are not shared across multiple worker processes. Rotate the ID after authentication or privilege changes, and destroy it on logout.
-
-~~~python
-import os
-from limbo import Limbo, SessionStore, session_middleware, csrf_protect
-
-app = Limbo()
-app.middleware(session_middleware(SessionStore(), secure=True))
-app.middleware(csrf_protect(os.environ["LIMBO_CSRF_SECRET"], secure=True))
-
-@app.post("/login")
-def login(request):
-    request.session["user_id"] = 123
-    request.session.regenerate()
-    return {"ok": True}
-
-@app.post("/logout")
-def logout(request):
-    request.session.destroy()
-    return {"ok": True}
-~~~
-
-For unsafe browser requests, send the readable CSRF cookie token in the X-CSRF-Token header, or use the _csrf field in URL-encoded forms. Multipart requests should use the header. Do not expose the CSRF secret in source control.
-
-BackgroundTasks is available as app.background_tasks; it bounds running plus queued work and shuts down with the app. It is not a durable queue. Use @app.on_startup and @app.on_shutdown for synchronous resource lifecycle hooks. WebSocket routes can set exact Origin checks, message-size limits and idle timeouts with @app.websocket("/ws", origins=("https://app.example",), max_message_bytes=65536, idle_timeout=30). Authentication and authorization helpers are extension points: authenticate(resolve_user) attaches request.user, and authorize(check) evaluates an application-defined policy. SessionBackend is a structural contract for user-supplied persistent/shared stores; Limbo does not ship a database-backed session adapter.
-
-## Frontend preview
-
-The project generator includes a dependency-free browser module example. For a custom project:
-
-```python
-app.enable_frontend("frontend")
-
-@app.get("/")
-def home(req):
-    return app.html("<div id='app'></div>" + app.frontend_script("src/main.js"))
+```bash
+python app.py
 ```
 
-The import map is emitted before the module entry. `limbo frontend doctor [directory]` inspects optional tools. To transform TypeScript/JSX/TSX, install esbuild in the *frontend project* yourself, for example `npm install --save-dev esbuild`. Vue SFC compilation needs `vue` plus `@vue/compiler-sfc`; Svelte SFC compilation needs `svelte`. Limbo does not run npm or fetch compilers for you. The base server may be used without Node.js for browser-native JavaScript modules. `limbo frontend capabilities --json` prints the versioned adapter capability manifest. The public adapter contract and current support boundaries are documented in [Frontend adapters](docs/FRONTEND_ADAPTERS.md).
+## Features
 
-There is a Vue sample in `examples/frontend/`. From the repository root, install the sample’s optional modules with `cd examples/frontend && npm install`, return to the repository root, then run `python examples/frontend_app.py` and open `http://127.0.0.1:8000`.
+### HTTP and routing
+- Decorator-based routes: GET, POST, PUT, PATCH and DELETE.
+- Dynamic path parameters, route groups, duplicate-route detection, and clear 404/405 handling.
+- Request helpers for headers, query/path parameters, cookies, JSON, URL-encoded forms and uploaded files.
+- JSON, HTML, text, redirects, byte/file responses and iterable streaming responses.
+- Threaded HTTP server with request/body limits, keep-alive handling and graceful shutdown.
 
-Framework adapters are intentionally partial: React TSX syntax can be transformed, but the current React CommonJS runtime package is **not** browser-module served; the adapter returns an explicit diagnostic instead of claiming the app runs. Vue/Svelte compiler output and ESM runtime module graphs have been exercised, but these adapters are experimental and do not claim general production compatibility. The dependency scanner recognizes static ESM imports, side-effect imports, re-exports and literal dynamic imports, plus CSS `@import` and quoted `url()` references. Browser-native CSS side-effect imports are extracted to `<link>` tags by `limbo build`. CSS imports with bindings stay on the dev server and are rejected by the production builder instead of being emitted as broken modules. `limbo build` hashes one file per module, rewrites relative URLs, and writes `manifest.json`. It does not bundle npm packages or split code. A development polling client can apply opt-in accept/dispose updates and otherwise reloads the page. Svelte component-state HMR is not implemented.
+### Backend building blocks
+- Ordered middleware, CORS, security headers, request IDs, access logging, rate limiting and gzip compression.
+- Static file delivery with path containment checks, ETags, conditional requests, cache headers and byte ranges.
+- Password hashing with scrypt and constant-time verification.
+- Signed stateless session tokens and optional bounded, server-side in-memory sessions.
+- Double-submit CSRF protection for browser requests.
+- Multipart uploads with configurable limits and request-scoped temporary files.
+- SQLite helper and checksummed, rollback-capable SQLite migrations.
+- WebSocket support with frame validation, message limits and optional Origin allowlists.
+- Bounded in-process background tasks and application startup/shutdown hooks.
 
-## Not claimed
+### Frontend and build tooling
+- Serve browser-native JavaScript, CSS, WebAssembly and static assets locally.
+- Local module resolution, dependency graph tracking, import maps and incremental invalidation.
+- Optional TypeScript/JSX/TSX transforms through a locally installed esbuild.
+- Experimental Vue and Svelte single-file-component adapters using locally installed compilers.
+- Opt-in development HMR with a safe full-page reload fallback.
+- `limbo build` generates browser-native production assets, hashed filenames and a manifest.
+- Optional minification only when a local esbuild is available.
 
-These are unimplemented or only partially exercised. Do not assume support:
+Limbo detects optional tools; it does **not** install packages, download compilers, or fetch runtime dependencies for you.
 
-- React, Preact, Solid, Lit, Angular, Astro, Qwik, Next, Nuxt, SvelteKit and Remix as verified app frameworks. A local process supervisor can start a child HTTP server; that is not those frameworks.
-- PostgreSQL, MySQL and MariaDB. Those URL schemes are rejected.
-- Downloading `cloudflared`, Node, or compilers. Quick Tunnel supervision requires an official binary you installed.
-- Code splitting, a PostCSS-complete CSS Modules pipeline, and Svelte component-state HMR.
-- A production security certification. See [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) and [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md).
+## Project templates
 
-The capability rows and their evidence are in [docs/CAPABILITY_MATRIX.md](docs/CAPABILITY_MATRIX.md). Status of every roadmap phase is in [docs/STATUS.md](docs/STATUS.md).
+```bash
+limbo create my-api --template python-api
+limbo create my-site --template static
+limbo create my-browser-app --template browser-native
+limbo create my-vue-app --template vue
+```
 
-## Static delivery and middleware
+| Template | Purpose |
+|---|---|
+| `python-api` | Python HTTP application starter |
+| `static` | Static site preview starter |
+| `browser-native` | JavaScript modules served locally by Limbo |
+| `vue` | Experimental Vue SFC starter |
 
-See [Static delivery and middleware](docs/STATIC_AND_MIDDLEWARE.md) for safe static mounts, response helpers, CORS, security headers, request IDs, access logs, rate limiting, gzip, and deployment limitations.
+## CLI
+
+| Command | What it does |
+|---|---|
+| `limbo create NAME` | Generate a starter project |
+| `limbo dev` | Run the local application |
+| `limbo dev --public` | Start a Quick Tunnel using an existing `cloudflared` binary |
+| `limbo start` | Run the application |
+| `limbo build` | Build supported frontend assets into `dist/` |
+| `limbo preview` | Preview an existing build directory |
+| `limbo doctor` | Inspect configuration and optional tools |
+| `limbo info` | Show version and core runtime information |
+| `limbo dependencies` | List required and optional integrations |
+| `limbo config validate` | Validate `limbo.toml` |
+| `limbo frontend doctor` | Inspect frontend compiler tools |
+| `limbo frontend capabilities --json` | Print the adapter capability manifest |
+| `limbo add PACKAGE` | Add a frontend package declaration |
+| `limbo remove PACKAGE` | Remove a frontend package declaration |
+| `limbo tunnel preflight` | Check optional tunnel prerequisites |
+
+The `add` and `remove` commands edit package metadata only. They do not run npm or install dependencies.
+
+## Frontend support boundaries
+
+Limbo's frontend toolchain is deliberately incremental. Use the capability matrix as the source of truth.
+
+| Technology | Current status |
+|---|---|
+| HTML, CSS, browser JavaScript | Supported |
+| Web Components | Supported through browser-native APIs |
+| WebAssembly assets | Supported for serving; your app handles instantiation |
+| TypeScript, JSX, TSX | Optional local esbuild transform |
+| Vue SFC | Experimental; local compiler required |
+| Svelte SFC | Experimental; local compiler required |
+| React, Preact, Solid, Lit | Not declared supported as framework integrations |
+| Angular, Astro, Qwik | Not supported |
+| Next.js, Nuxt, SvelteKit, Remix | Not supported as integrated frameworks |
+| SQLite | Supported |
+| PostgreSQL, MySQL | Not supported |
+
+A syntax transform is not the same as a complete framework runtime integration. A process supervisor is not framework support. Limbo avoids advertising unverified integrations as working features.
+
+Read [Frontend adapters](docs/FRONTEND_ADAPTERS.md) for setup details and limitations.
+
+## Configuration
+
+Limbo can load typed configuration from `limbo.toml`. For example:
+
+```toml
+[app]
+name = "My Limbo app"
+debug = true
+
+[server]
+host = "127.0.0.1"
+port = 8000
+```
+
+Configuration precedence is:
+
+1. CLI arguments
+2. Supported environment overrides
+3. `limbo.toml`
+4. Safe defaults
+
+Validate the configuration with:
+
+```bash
+limbo config validate
+```
 
 ## Tests
 
-The test suite uses only the Python standard library:
+Run the standard-library test suite from the repository root:
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-## Security note
+The project also maintains focused frontend/browser acceptance checks. Passing the test suite is not a security certification or a guarantee for every operating system and deployment environment.
 
-This is an early release. Keep it bound to localhost while evaluating. Stateless SessionSigner payloads are signed but **not encrypted**, so do not place secrets in them. The optional in-memory SessionStore keeps data server-side but is process-local and non-persistent. Password hashing uses scrypt with a fixed conservative default; assess resource policy for your deployment. The built-in static server checks resolved paths remain within the configured root; it does not promise a comprehensive security boundary against every filesystem race, malformed HTTP edge case, or hostile deployment environment. Set an upstream reverse proxy and review the code before any public deployment.
+## Security and deployment
 
+Limbo is designed to be evaluated locally first. Keep the server bound to `127.0.0.1` while developing.
 
-See [Static delivery and middleware](docs/STATIC_AND_MIDDLEWARE.md) for static mounts, conditional/range responses, middleware, compression and SPA fallback behavior.
+Before exposing an application publicly:
 
+- Put it behind a properly configured reverse proxy.
+- Review the [Threat Model](docs/THREAT_MODEL.md) and [Release Checklist](docs/RELEASE_CHECKLIST.md).
+- Configure secrets through environment variables; never commit them.
+- Understand that the built-in in-memory session store is process-local and is lost on restart.
+- Do not put secrets in stateless signed session payloads; signatures provide integrity, not encryption.
+- Treat the built-in server and optional tunnel integration as framework building blocks, not a substitute for deployment hardening or an independent security review.
 
-## Phase 3 end-to-end example
+The optional tunnel workflow requires an official `cloudflared` executable that you install yourself. Limbo does not download it.
 
-See [`examples/phase3_app.py`](examples/phase3_app.py) for a runnable integration of sessions, CSRF, authentication/authorization extension points, bounded uploads, WebSocket policies and background tasks. Set `LIMBO_CSRF_SECRET` to at least 32 random bytes before running it. The demo identity map is intentionally not a real login system.
+## Documentation
+
+- [Project status and roadmap](docs/STATUS.md)
+- [Capability matrix](docs/CAPABILITY_MATRIX.md)
+- [Frontend adapter guide](docs/FRONTEND_ADAPTERS.md)
+- [Frontend runtime integration roadmap](docs/FRONTEND_RUNTIME_ROADMAP.md)
+- [Static delivery and middleware](docs/STATIC_AND_MIDDLEWARE.md)
+- [Threat model](docs/THREAT_MODEL.md)
+- [Release checklist](docs/RELEASE_CHECKLIST.md)
+
+## Contributing
+
+Issues, focused bug reports, tests and documentation improvements are welcome. When reporting a bug, include your Python version, operating system, a minimal reproduction and the exact command or test output.
+
+## License
+
+Limbo is licensed under the [MIT License](LICENSE).
