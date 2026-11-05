@@ -7,6 +7,13 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/status-BETA-orange" alt="Beta status" />
+  <img src="https://img.shields.io/badge/version-0.9.0-blue" alt="Version 0.9.0" />
+  <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+" />
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" />
+</p>
+
+<p align="center">
   <a href="https://github.com/Quincunx33/limbo">Repository</a> ·
   <a href="docs/STATUS.md">Roadmap status</a> ·
   <a href="docs/CAPABILITY_MATRIX.md">Capability matrix</a> ·
@@ -15,33 +22,48 @@
 
 ---
 
+> [!WARNING]
+> **Limbo is currently in BETA (0.9.0).** It is actively evolving and is not a stable 1.0 release. Some roadmap phases are still open, and some integrations are experimental, incomplete, or unsupported. APIs and behavior may change. Do not assume production readiness; review the status, capability matrix, and security notes before deployment.
+
 ## What is Limbo?
 
-Limbo is a Python-first, local-first framework foundation for building HTTP applications and browser-based projects. Its core uses Python's standard library: no Flask, FastAPI, Django, Starlette, or external application server is required.
+Limbo is a Python-first, local-first framework for building HTTP applications and browser-based projects. Its core uses Python's standard library: no Flask, FastAPI, Django, Starlette, or external application server is required.
 
-The project combines a small HTTP server and routing layer with practical backend building blocks, local frontend module tooling, and a production build path for supported browser-native projects.
+It combines a lightweight HTTP server and routing layer with backend building blocks, local frontend module tooling, and a production build path for supported browser-native projects.
 
-**Current release:** `0.9.0` · **Python:** `3.10+` · **License:** MIT
+- **PyPI distribution name:** `limbo33`
+- **Python import package:** `limbo`
+- **CLI command:** `limbo`
+- **Current development version:** `0.9.0`
+- **Python:** `3.10+`
+- **License:** MIT
 
-> **Project status:** Limbo is an early-stage framework, not a declared 1.0 release. Some integrations are optional or experimental, and several popular frontend frameworks are not currently supported. Review the capability matrix and security notes before choosing it for a deployment.
+## Installation
 
-## Install
-
-The published Python distribution name is **`limbo33`**. The import package and command-line executable are named **`limbo`**.
+The package name used for installation is `limbo33`:
 
 ```bash
 python -m pip install limbo33
 ```
 
-Verify the installation:
+Check the installed CLI:
 
 ```bash
 limbo info
+limbo doctor
 ```
 
-## Quick start
+If the package is not yet available from your configured package index, install the repository in editable mode from its root:
 
-Create a starter project:
+```bash
+python -m pip install -e .
+```
+
+## Get started
+
+### Option 1 — Generate a project
+
+The easiest way to start is with the Limbo CLI:
 
 ```bash
 limbo create hello-limbo
@@ -49,9 +71,22 @@ cd hello-limbo
 limbo dev
 ```
 
-Open **http://127.0.0.1:8000**.
+Then open **http://127.0.0.1:8000** in your browser.
 
-Or create an application manually:
+You can choose a starter template:
+
+```bash
+limbo create my-api --template python-api
+limbo create my-site --template static
+limbo create my-browser-app --template browser-native
+limbo create my-vue-app --template vue
+```
+
+The Vue starter is experimental. Check the generated project and the frontend capability guide before relying on it.
+
+### Option 2 — Write an app yourself
+
+Create a file named `app.py`:
 
 ```python
 from limbo import Limbo
@@ -61,6 +96,10 @@ app = Limbo()
 @app.get("/")
 def home(request):
     return app.html("<h1>Hello from Limbo</h1>")
+
+@app.get("/api/hello")
+def hello(request):
+    return {"message": "Hello from Limbo"}
 
 @app.get("/api/users/{user_id}")
 def get_user(request):
@@ -74,23 +113,40 @@ if __name__ == "__main__":
     app.run(host="127.0.0.1", port=8000)
 ```
 
-Run it:
+Run the application:
 
 ```bash
 python app.py
 ```
 
-## Features
+Try the endpoints:
 
-### HTTP and routing
+```bash
+curl http://127.0.0.1:8000/
+curl http://127.0.0.1:8000/api/hello
+curl http://127.0.0.1:8000/api/users/42
+curl -X POST http://127.0.0.1:8000/api/echo \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Limbo"}'
+```
+
+The last endpoint reads the JSON request body with `request.json()` and returns it as JSON.
+
+## What can you build?
+
+### HTTP APIs and routing
+
 - Decorator-based routes: GET, POST, PUT, PATCH and DELETE.
-- Dynamic path parameters, route groups, duplicate-route detection, and clear 404/405 handling.
+- Dynamic path parameters and route groups.
+- Duplicate-route detection and clear 404/405 handling.
 - Request helpers for headers, query/path parameters, cookies, JSON, URL-encoded forms and uploaded files.
 - JSON, HTML, text, redirects, byte/file responses and iterable streaming responses.
 - Threaded HTTP server with request/body limits, keep-alive handling and graceful shutdown.
 
-### Backend building blocks
-- Ordered middleware, CORS, security headers, request IDs, access logging, rate limiting and gzip compression.
+### Backend features
+
+- Ordered middleware, CORS, security headers, request IDs and access logging.
+- Rate limiting and gzip compression.
 - Static file delivery with path containment checks, ETags, conditional requests, cache headers and byte ranges.
 - Password hashing with scrypt and constant-time verification.
 - Signed stateless session tokens and optional bounded, server-side in-memory sessions.
@@ -101,6 +157,7 @@ python app.py
 - Bounded in-process background tasks and application startup/shutdown hooks.
 
 ### Frontend and build tooling
+
 - Serve browser-native JavaScript, CSS, WebAssembly and static assets locally.
 - Local module resolution, dependency graph tracking, import maps and incremental invalidation.
 - Optional TypeScript/JSX/TSX transforms through a locally installed esbuild.
@@ -111,28 +168,12 @@ python app.py
 
 Limbo detects optional tools; it does **not** install packages, download compilers, or fetch runtime dependencies for you.
 
-## Project templates
+## CLI reference
 
-```bash
-limbo create my-api --template python-api
-limbo create my-site --template static
-limbo create my-browser-app --template browser-native
-limbo create my-vue-app --template vue
-```
-
-| Template | Purpose |
-|---|---|
-| `python-api` | Python HTTP application starter |
-| `static` | Static site preview starter |
-| `browser-native` | JavaScript modules served locally by Limbo |
-| `vue` | Experimental Vue SFC starter |
-
-## CLI
-
-| Command | What it does |
+| Command | Purpose |
 |---|---|
 | `limbo create NAME` | Generate a starter project |
-| `limbo dev` | Run the local application |
+| `limbo dev` | Run the local development application |
 | `limbo dev --public` | Start a Quick Tunnel using an existing `cloudflared` binary |
 | `limbo start` | Run the application |
 | `limbo build` | Build supported frontend assets into `dist/` |
@@ -147,11 +188,11 @@ limbo create my-vue-app --template vue
 | `limbo remove PACKAGE` | Remove a frontend package declaration |
 | `limbo tunnel preflight` | Check optional tunnel prerequisites |
 
-The `add` and `remove` commands edit package metadata only. They do not run npm or install dependencies.
+**Important:** `limbo add` and `limbo remove` edit package metadata only. They do not run npm or install dependencies.
 
-## Frontend support boundaries
+## Frontend support: read before choosing a stack
 
-Limbo's frontend toolchain is deliberately incremental. Use the capability matrix as the source of truth.
+Limbo's frontend toolchain is deliberately incremental. A syntax transform is not the same as a complete framework integration.
 
 | Technology | Current status |
 |---|---|
@@ -167,13 +208,13 @@ Limbo's frontend toolchain is deliberately incremental. Use the capability matri
 | SQLite | Supported |
 | PostgreSQL, MySQL | Not supported |
 
-A syntax transform is not the same as a complete framework runtime integration. A process supervisor is not framework support. Limbo avoids advertising unverified integrations as working features.
+A process supervisor is not framework support. Limbo avoids advertising unverified integrations as working features.
 
-Read [Frontend adapters](docs/FRONTEND_ADAPTERS.md) for setup details and limitations.
+See [Frontend adapters](docs/FRONTEND_ADAPTERS.md) and the [Capability matrix](docs/CAPABILITY_MATRIX.md) for exact boundaries and setup requirements.
 
 ## Configuration
 
-Limbo can load typed configuration from `limbo.toml`. For example:
+Limbo can load typed configuration from `limbo.toml`. Example:
 
 ```toml
 [app]
@@ -185,39 +226,70 @@ host = "127.0.0.1"
 port = 8000
 ```
 
-Configuration precedence is:
+Configuration precedence:
 
 1. CLI arguments
 2. Supported environment overrides
 3. `limbo.toml`
 4. Safe defaults
 
-Validate the configuration with:
+Validate it with:
 
 ```bash
 limbo config validate
 ```
 
-## Tests
+## Build and preview
 
-Run the standard-library test suite from the repository root:
+For supported browser-native frontend projects, run:
+
+```bash
+limbo build
+limbo preview
+```
+
+The build writes production assets to `dist/`, including hashed filenames and a manifest. TypeScript/Vue/Svelte files require their corresponding optional local compiler. Code splitting is not currently supported; see [Project status](docs/STATUS.md) for the precise build boundary.
+
+## Testing
+
+From the repository root:
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-The project also maintains focused frontend/browser acceptance checks. Passing the test suite is not a security certification or a guarantee for every operating system and deployment environment.
+The project also maintains focused frontend/browser acceptance checks. A passing test suite is useful evidence, but it is not a security certification or a guarantee for every operating system and deployment environment.
 
-## Security and deployment
+## Current development status
 
-Limbo is designed to be evaluated locally first. Keep the server bound to `127.0.0.1` while developing.
+Limbo is not feature-complete. The status ledger is the source of truth and records the actual verification boundary for each phase.
+
+| Phase | Status |
+|---|---|
+| 0 | Complete |
+| 1 | Complete |
+| 2 | Complete |
+| 3 | Engineering-complete |
+| 4 | Engineering-complete |
+| 5 | Verified slice — not full Node resolution or complete HMR |
+| 6 | Complete for browser-native projects; code splitting remains unsupported |
+| 7 | Contract only, except native JavaScript; major framework integrations remain unsupported |
+| 8 | SQLite complete; PostgreSQL/MySQL unsupported |
+| 9 | Optional binary integration; no tunnel protocol implementation or binary download |
+| 10 | Open — project hardening and release work remain |
+
+These labels describe the current repository evidence, not a promise that every feature is production-ready. See the detailed [roadmap/status ledger](docs/STATUS.md).
+
+## Security and deployment notes
+
+Limbo should be evaluated locally first. Keep the server bound to `127.0.0.1` while developing.
 
 Before exposing an application publicly:
 
 - Put it behind a properly configured reverse proxy.
 - Review the [Threat Model](docs/THREAT_MODEL.md) and [Release Checklist](docs/RELEASE_CHECKLIST.md).
 - Configure secrets through environment variables; never commit them.
-- Understand that the built-in in-memory session store is process-local and is lost on restart.
+- Remember that the built-in in-memory session store is process-local and is lost on restart.
 - Do not put secrets in stateless signed session payloads; signatures provide integrity, not encryption.
 - Treat the built-in server and optional tunnel integration as framework building blocks, not a substitute for deployment hardening or an independent security review.
 
@@ -235,7 +307,7 @@ The optional tunnel workflow requires an official `cloudflared` executable that 
 
 ## Contributing
 
-Issues, focused bug reports, tests and documentation improvements are welcome. When reporting a bug, include your Python version, operating system, a minimal reproduction and the exact command or test output.
+Bug reports, focused tests and documentation improvements are welcome. When reporting a bug, include your Python version, operating system, a minimal reproduction and the exact command or test output.
 
 ## License
 
