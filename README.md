@@ -7,8 +7,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/RELEASE-BETA-orange?style=for-the-badge" alt="BETA release" />
-  <img src="https://img.shields.io/badge/version-0.9.0-blue" alt="Version 0.9.0" />
+  <img src="https://img.shields.io/badge/RELEASE-1.0.0-orange?style=for-the-badge" alt="Version 1.0.0" />
+  <img src="https://img.shields.io/badge/version-1.0.0-blue" alt="Version 1.0.0" />
   <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+" />
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" />
 </p>
@@ -23,9 +23,9 @@
 ---
 
 > [!WARNING]
-> **BETA RELEASE — Limbo 0.9.0**
+> **1.0.0 RELEASE — Limbo**
 >
-> Limbo is under active development and is **not a stable 1.0 release**. Features, APIs, and behavior may change without a compatibility guarantee. Some roadmap phases remain open, and some integrations are experimental or unsupported. Use it for evaluation and testing; do not assume production readiness. Review the status, capability matrix, threat model, and release checklist before deployment.
+> Limbo is versioned as 1.0.0, but it remains under active development and is **not production-certified**. Features, APIs, and behavior may change without a compatibility guarantee. Some roadmap phases remain open, and some integrations are experimental or unsupported. Use it for evaluation and testing; do not assume production readiness. Review the status, capability matrix, threat model, and release checklist before deployment.
 
 ## What is Limbo?
 
@@ -36,7 +36,7 @@ It combines a lightweight HTTP server and routing layer with backend building bl
 - **PyPI distribution name:** `limbo33`
 - **Python import package:** `limbo`
 - **CLI command:** `limbo`
-- **Current development version:** `0.9.0`
+- **Current development version:** `1.0.0`
 - **Python:** `3.10+`
 - **License:** MIT
 
@@ -204,7 +204,8 @@ Limbo's frontend toolchain is deliberately incremental. A syntax transform is no
 | TypeScript, JSX, TSX | Optional local esbuild transform |
 | Vue SFC | Experimental; local compiler required |
 | Svelte SFC | Experimental; local compiler required |
-| React, Preact, Solid, Lit | Not declared supported as framework integrations |
+| React, Preact, Lit | Optional local runtimes. Install them yourself. React needs local esbuild. No Fast Refresh. |
+| Solid | Not supported. No fixture. |
 | Angular, Astro, Qwik | Not supported |
 | Next.js, Nuxt, SvelteKit, Remix | Not supported as integrated frameworks |
 | SQLite | Supported |
@@ -257,10 +258,33 @@ The build writes production assets to `dist/`, including hashed filenames and a 
 From the repository root:
 
 ```bash
+python -m compileall -q limbo tests
 python -m unittest discover -s tests -v
 ```
 
-The project also maintains focused frontend/browser acceptance checks. A passing test suite is useful evidence, but it is not a security certification or a guarantee for every operating system and deployment environment.
+The standard-library suite does not require third-party Python runtime dependencies. To run the optional frontend parser, SFC and Chromium acceptance checks, install the test tools and local frontend compilers first:
+
+```bash
+python -m pip install pytest
+npm install --no-save acorn esbuild vue @vue/compiler-sfc svelte preact lit react react-dom
+```
+
+Chromium must also be available on `PATH`. Because Limbo deliberately discovers tools from the current project, expose the local npm binaries before running the browser checks:
+
+```bash
+export PATH="$PWD/node_modules/.bin:$PATH"
+python -m pytest -q \
+  tests/test_frontend_engine_phase5.py \
+  tests/test_frontend.py \
+  tests/test_browser_frontend_phase5.py \
+  tests/test_browser_sfc_phase5.py \
+  tests/test_browser_wasm_phase5.py \
+  tests/test_browser_runtimes_phase5.py
+```
+
+If `node_modules/.bin` is not on `PATH`, the TypeScript and JSX browser subtests are skipped with `Local esbuild is not installed`, even when the package exists locally. A passing test suite is useful evidence, but it is not a security certification or a guarantee for every operating system and deployment environment.
+
+GitHub Actions runs the platform smoke tests on Ubuntu, Windows, and `macos-latest`. The macOS job is included in the workflow for 1.0.0 verification; its hosted result must be green before macOS support is considered verified.
 
 ## Current development status
 
@@ -273,9 +297,9 @@ Limbo is not feature-complete. The status ledger is the source of truth and reco
 | 2 | Complete |
 | 3 | Engineering-complete |
 | 4 | Engineering-complete |
-| 5 | Verified slice — not full Node resolution or complete HMR |
-| 6 | Complete for browser-native projects; code splitting remains unsupported |
-| 7 | Contract only, except native JavaScript; major framework integrations remain unsupported |
+| 5 | Verified slice — local import maps, `/_limbo_modules`, CommonJS via local esbuild |
+| 6 | Browser-native production build, including vendored local ESM; code splitting remains unsupported |
+| 7 | Preact, Lit and React are optional local fixtures. Next, Nuxt, SvelteKit, Remix, Angular, Astro, Qwik and Solid are not |
 | 8 | SQLite complete; PostgreSQL/MySQL unsupported |
 | 9 | Optional binary integration; no tunnel protocol implementation or binary download |
 | 10 | Open — project hardening and release work remain |

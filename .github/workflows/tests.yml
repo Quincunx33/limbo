@@ -49,9 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macos-latest intermittently hangs on the hosted runner before tests
-        # start; keep the deterministic Linux and Windows coverage here.
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -97,7 +95,7 @@ jobs:
           node-version: "22"
           cache: npm
       - name: Install optional parser and local framework tools
-        run: npm install --no-save acorn esbuild vue @vue/compiler-sfc svelte
+        run: npm install --no-save acorn esbuild vue @vue/compiler-sfc svelte preact lit react react-dom
       - name: Install Chromium for browser fixtures
         run: |
           sudo apt-get update
