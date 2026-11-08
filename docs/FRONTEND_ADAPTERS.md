@@ -42,13 +42,17 @@ fallback because it is not currently a registered adapter.
 ## Local runtime packages
 
 Buildless development is local-first by default. Bare imports are resolved from
-the project's node_modules, emitted into a generated import map, and served
-under /_pkgfile/; no CDN URL is inserted. The dev server rejects http:, https:
-and data: module imports unless an explicit remote-import adapter is selected.
-Install a browser-native ESM runtime locally, for example React, Preact, Solid
-or Lit, and import it by package name from the frontend source. CommonJS-only
-packages still require a local transform or bundler and are reported as an
-actionable error rather than being guessed at runtime.
+the project's `node_modules`, emitted into a generated import map, and served
+under `/_limbo_modules/` (`/_pkgfile/` still works). No CDN URL is inserted.
+The dev server rejects `http:`, `https:` and `data:` module imports unless an
+explicit remote-import adapter is selected.
+
+Browser ESM packages such as Preact and Lit are served as files. CommonJS
+packages such as React are transformed with a local esbuild binary when one is
+already installed in the frontend project (`npm install --save-dev esbuild`).
+Limbo does not download esbuild or a CDN build. If esbuild is missing, the
+error names the package and the install command. Node built-ins and native
+addons are refused. React Fast Refresh is not implemented. Solid has no fixture.
 
 ## Capability manifest
 

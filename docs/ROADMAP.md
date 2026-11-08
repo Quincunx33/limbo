@@ -5,7 +5,7 @@
 **Working branch:** `main`
 **Target:** 1.0.0 remains unreleased until the Phase 10 review gates are actually signed off
 
-**Engineering status (2026-11-04):** Phases 1–4 are complete. Phase 5 has a verified local pipeline and browser smoke coverage, with PostCSS-complete CSS Modules and Svelte state HMR still explicitly out of scope. Phases 6–9 have tested implementations: browser-native production builds, an honest framework matrix plus a local process supervisor, SQLite migrations, and optional `cloudflared` supervision. The private repository's final GitHub Actions run is green on Linux and Windows across Python 3.10–3.13, including the optional frontend-tool/browser job. The hosted macOS runner repeatedly hung and is intentionally excluded from the workflow; no macOS support claim is made. Independent security review is still outstanding, so this is not 1.0. See [STATUS.md](STATUS.md).
+**Engineering status (2026-11-08):** Phases 1–4 are complete. Phase 5 has a verified local pipeline, `/_limbo_modules`, and browser fixtures for Preact, Lit and React (React via local esbuild, not Fast Refresh). PostCSS-complete CSS Modules and Svelte state HMR stay out of scope. Phases 6–9 have tested implementations: browser-native production builds that vendor local ESM, an honest framework matrix, SQLite migrations, and optional `cloudflared` supervision. Independent security review is still outstanding, so this is not 1.0. macOS is unverified. See [STATUS.md](STATUS.md).
 
 This roadmap is a delivery plan, not a claim that planned features already exist. A capability is supported only after its implementation, end-to-end tests, documentation and compatibility entry are complete.
 
@@ -327,7 +327,7 @@ A feature is not “done” because code exists. It is done only when the docume
 
 The engineering slices below are implemented and covered by the standard-library suite. Do not treat that as a 1.0 sign-off.
 
-1. Keep the capability matrix honest. Do not promote React, Next, Nuxt, SvelteKit, Remix, Angular, Astro, Qwik, PostgreSQL or MySQL without a real integration test.
+1. Keep the capability matrix honest. Preact, Lit and React are optional local fixtures only. Do not promote Solid, Next, Nuxt, SvelteKit, Remix, Angular, Astro, Qwik, PostgreSQL or MySQL without a real integration test. Do not mark React or Preact `supported`.
 2. Run the existing GitHub workflow on Windows and macOS before any release that claims those platforms.
 3. Commission an independent review of HTTP parsing, path handling, sessions, CSRF, uploads, WebSockets and tunnel exposure. The threat model is a starting note, not that review.
 4. Leave code splitting, PostCSS-complete CSS Modules and Svelte component-state HMR unimplemented until they can be tested for real.

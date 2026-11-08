@@ -181,7 +181,7 @@ class FrontendServingTests(unittest.TestCase):
             (root / "node_modules" / "dep" / "index.js").write_text("export default 3;", encoding="utf-8")
             app = Limbo(); frontend = app.enable_frontend(root)
             tags = app.frontend_script("src/main.js")
-            self.assertIn('"dep":"/__limbo/_pkgfile/node_modules/dep/index.js"', tags)
+            self.assertIn('"dep":"/__limbo/_limbo_modules/dep/index.js"', tags)
             js = app.dispatch(Request("GET", "/__limbo/src/main.js", {}))
             self.assertEqual(js.status, 200)
             self.assertIn(b'console.log', js.body)
@@ -220,7 +220,7 @@ class FrontendServingTests(unittest.TestCase):
             )
             frontend = FrontendDevServer(root)
             imports = frontend.import_map("src/main.js")["imports"]
-            self.assertEqual(imports["local-ui"], "/__limbo/_pkgfile/node_modules/local-ui/index.js")
+            self.assertEqual(imports["local-ui"], "/__limbo/_limbo_modules/local-ui/index.js")
             package_response = frontend.serve(Request("GET", imports["local-ui"], {}))
             self.assertEqual(package_response.status, 200)
             self.assertIn(b"createElement", package_response.body)
@@ -341,7 +341,10 @@ class FrontendServingTests(unittest.TestCase):
             package_css = frontend.serve(Request("GET", "/__limbo/_pkgfile/node_modules/theme/dist/style.css", {}))
             self.assertEqual(package_css.status, 200)
             self.assertIn("text/css", package_css.headers.get("Content-Type", ""))
-            self.assertIn(b"/__limbo/_pkgfile/node_modules/theme-base/reset.css", package_css.body)
+            self.assertIn(b"/__limbo/_limbo_modules/theme-base/reset.css", package_css.body)
+            canonical = frontend.serve(Request("GET", "/__limbo/_limbo_modules/theme/dist/style.css", {}))
+            self.assertEqual(canonical.status, 200)
+            self.assertEqual(canonical.body, package_css.body)
 
     def test_css_import_with_bindings_serves_css_module(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -376,6 +379,81 @@ class FrontendServingTests(unittest.TestCase):
             else:
                 with self.assertRaisesRegex(FrontendError, "npm install --save-dev esbuild"):
                     compiler.transform(path)
+
+    def test_module_namespace_rejects_traversal_and_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "src").mkdir()
+            (root / "src" / "main.js").write_text('import "dep";', encoding="utf-8")
+            package = root / "node_modules" / "dep"
+            package.mkdir(parents=True)
+            (package / "package.json").write_text('{"name":"dep","module":"index.js"}', encoding="utf-8")
+            (package / "index.js").write_text("export const value = 1;", encoding="utf-8")
+            secret = Path(temp) / "secret.js"
+            secret.write_text("export const SECRET = 'nope';", encoding="utf-8")
+            try:
+                (package / "escape.js").symlink_to(secret)
+            except OSError:
+                self.skipTest("symlinks are not available")
+            frontend = FrontendDevServer(root)
+            frontend.import_map("src/main.js")
+            frontend._allowed_modules.add((package / "escape.js").resolve())
+            leaked = frontend.serve(Request("GET", "/__limbo/_limbo_modules/dep/escape.js", {}))
+            self.assertEqual(leaked.status, 404)
+            self.assertNotIn(b"SECRET", leaked.body)
+            traversal = frontend.serve(Request("GET", "/__limbo/_limbo_modules/dep/%2e%2e/%2e%2e/secret.js", {}))
+            self.assertEqual(traversal.status, 404)
+            legacy = frontend.serve(Request("GET", "/__limbo/_pkgfile/node_modules/dep/index.js", {}))
+            self.assertEqual(legacy.status, 200)
+            self.assertIn(b"value", legacy.body)
+
+    def test_scoped_package_import_map_is_deterministic_and_local(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "src").mkdir()
+            (root / "src" / "main.js").write_text('import "@scope/ui";\nimport "dep";', encoding="utf-8")
+            scoped = root / "node_modules" / "@scope" / "ui"
+            scoped.mkdir(parents=True)
+            (scoped / "package.json").write_text('{"name":"@scope/ui","exports":{".":"./index.js"}}', encoding="utf-8")
+            (scoped / "index.js").write_text("export const scoped = true;", encoding="utf-8")
+            dep = root / "node_modules" / "dep"
+            dep.mkdir()
+            (dep / "package.json").write_text('{"name":"dep","module":"index.js"}', encoding="utf-8")
+            (dep / "index.js").write_text("export const dep = true;", encoding="utf-8")
+            frontend = FrontendDevServer(root)
+            first = frontend.import_map("src/main.js")
+            second = FrontendDevServer(root).import_map("src/main.js")
+            self.assertEqual(first, second)
+            self.assertEqual(list(first["imports"]), ["@scope/ui", "dep"])
+            self.assertTrue(all(url.startswith("/__limbo/_limbo_modules/") for url in first["imports"].values()))
+            self.assertNotIn("http", json.dumps(first))
+
+    def test_commonjs_without_esbuild_is_actionable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "src").mkdir()
+            (root / "src" / "main.js").write_text('import "cjs-pkg";', encoding="utf-8")
+            package = root / "node_modules" / "cjs-pkg"
+            package.mkdir(parents=True)
+            (package / "package.json").write_text('{"name":"cjs-pkg","main":"index.js"}', encoding="utf-8")
+            (package / "index.js").write_text("module.exports = { value: 1 };", encoding="utf-8")
+            frontend = FrontendDevServer(root)
+            if frontend.compiler.esbuild:
+                payload = frontend.import_map("src/main.js")
+                body = frontend.serve(Request("GET", payload["imports"]["cjs-pkg"], {})).body
+                self.assertIn(b"export", body)
+                self.assertNotIn(b"unpkg.com", body)
+                self.assertNotIn(b"esm.sh", body)
+            else:
+                with self.assertRaisesRegex(FrontendError, "npm install --save-dev esbuild"):
+                    frontend.import_map("src/main.js")
+
+    def test_custom_module_namespace_is_rejected_when_unsafe(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "main.js").write_text("export const ok = 1;", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                FrontendDevServer(root, module_namespace="/_limbo_modules/../etc")
 
 
 if __name__ == "__main__": unittest.main()

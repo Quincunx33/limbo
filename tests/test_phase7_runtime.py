@@ -51,7 +51,9 @@ class RuntimeTests(unittest.TestCase):
         by_id = {row["id"]: row["status"] for row in rows}
         self.assertEqual(by_id["html-css-js"], "supported")
         self.assertEqual(by_id["sqlite"], "supported")
-        self.assertEqual(by_id["react"], "unsupported")
+        self.assertEqual(by_id["react"], "optional")
+        self.assertEqual(by_id["preact"], "optional")
+        self.assertEqual(by_id["lit"], "optional")
         self.assertEqual(by_id["next"], "unsupported")
         self.assertEqual(by_id["postgres"], "unsupported")
         self.assertEqual(by_id["vue"], "experimental")

@@ -182,8 +182,28 @@ class Limbo:
     def template_directory(self, directory: str | os.PathLike[str]) -> None:
         self.templates = TemplateEngine(directory)
 
-    def enable_frontend(self, directory: str | os.PathLike[str], *, url_prefix: str = "/__limbo") -> FrontendDevServer:
-        frontend = FrontendDevServer(directory, url_prefix=url_prefix)
+    def enable_frontend(self, directory: str | os.PathLike[str], *, url_prefix: str = "/__limbo",
+                        allow_remote: bool | None = None, module_namespace: str | None = None,
+                        jsx_import_source: str | None = None, jsx_runtime: str | None = None,
+                        config=None) -> FrontendDevServer:
+        frontend_config = config.section("frontend") if config is not None else None
+        if frontend_config is not None:
+            if allow_remote is None:
+                allow_remote = bool(frontend_config.get("allow_remote_imports", False))
+            if module_namespace is None:
+                module_namespace = frontend_config.get("module_url_prefix", "/_limbo_modules")
+            if jsx_import_source is None:
+                jsx_import_source = frontend_config.get("jsx_import_source", "react")
+            if jsx_runtime is None:
+                jsx_runtime = frontend_config.get("jsx_runtime", "automatic")
+        frontend = FrontendDevServer(
+            directory,
+            url_prefix=url_prefix,
+            allow_remote=bool(allow_remote),
+            module_namespace=module_namespace or "/_limbo_modules",
+            jsx_import_source=jsx_import_source or "react",
+            jsx_runtime=jsx_runtime or "automatic",
+        )
         if any(existing.prefix == frontend.prefix for existing in self.frontend_servers):
             raise ValueError(f"Frontend URL prefix already mounted: {frontend.prefix}")
         self.frontend_servers.append(frontend)

@@ -9,13 +9,14 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from .css_scanner import scan_css_dependencies
-from .frontend import BROWSER_BUILTINS, FrontendError, ModuleResolver
+from .frontend import BROWSER_BUILTINS, FrontendCompiler, FrontendError, ModuleResolver
 from .frontend_scanner import scan_imports
 
 _SOURCE_SUFFIXES = {".js", ".mjs", ".css"}
@@ -24,6 +25,14 @@ _ASSET_SUFFIXES = {
     ".woff", ".woff2", ".ttf", ".wasm", ".mp3", ".mp4", ".webmanifest", ".json", ".txt",
 }
 _COMPILED_ONLY = {".ts", ".tsx", ".jsx", ".vue", ".svelte"}
+_CJS_RE = re.compile(r"\bmodule\.exports\b|^\s*exports\.[A-Za-z_$][\w$]*\s*=|\brequire\s*\(", re.MULTILINE)
+_REMOTE_URL_RE = re.compile(r"https?://(?:unpkg\.com|cdn\.jsdelivr\.net|esm\.sh)/", re.IGNORECASE)
+
+
+def _looks_like_commonjs(text: str) -> bool:
+    scan = re.sub(r"/\*[\s\S]*?\*/", "", text)
+    scan = re.sub(r"(?m)^\s*//.*$", "", scan)
+    return _CJS_RE.search(scan) is not None
 
 
 class BuildError(RuntimeError):
@@ -173,6 +182,9 @@ def build_project(project: str | Path, config=None, *, frontend: str | None = No
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(data)
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    blob = b"\n".join(emitted[name] for name in sorted(emitted))
+    if _REMOTE_URL_RE.search(blob.decode("utf-8", errors="ignore")):
+        raise BuildError("Production output contains a CDN URL. Limbo refuses to emit remote runtime imports.")
     report_body = {
         "digest": digest,
         "asset_count": len(emitted),
@@ -242,15 +254,15 @@ def _walk(root: Path, resolver: ModuleResolver, entry: Path, files: dict[Path, b
         seen.add(current)
         resolver._assert_in_project(current)
         rel_parts = current.relative_to(root).parts
-        if "node_modules" in rel_parts or any(part.startswith(".") for part in rel_parts):
-            raise BuildError(f"Refusing to publish hidden or node_modules path: {current.relative_to(root)}")
+        if any(part.startswith(".") for part in rel_parts):
+            raise BuildError(f"Refusing to publish hidden path: {current.relative_to(root)}")
         try:
             raw = current.read_bytes()
         except OSError as exc:
             raise BuildError(f"Cannot read {current}: {exc}") from exc
         files[current] = raw
         suffix = current.suffix.lower()
-        if suffix not in _SOURCE_SUFFIXES:
+        if suffix not in _SOURCE_SUFFIXES and suffix != ".cjs":
             if suffix in _COMPILED_ONLY:
                 files[current] = raw
             continue
@@ -258,6 +270,13 @@ def _walk(root: Path, resolver: ModuleResolver, entry: Path, files: dict[Path, b
             text = raw.decode("utf-8")
         except UnicodeError as exc:
             raise BuildError(f"{current.name} is not valid UTF-8 source.") from exc
+        if suffix in {".js", ".mjs", ".cjs"} and _looks_like_commonjs(text):
+            try:
+                text = FrontendCompiler(root).bundle_browser_esm(current)
+            except FrontendError as exc:
+                raise BuildError(str(exc)) from exc
+            raw = text.encode("utf-8")
+            files[current] = raw
         if suffix == ".css":
             for ref in scan_css_dependencies(text):
                 if ref.kind == "asset" and ref.specifier.startswith("/"):
@@ -284,11 +303,17 @@ def _walk(root: Path, resolver: ModuleResolver, entry: Path, files: dict[Path, b
                     f"Node.js built-in '{spec}' in {current.name} cannot ship in a browser build."
                 )
             if not spec.startswith(("./", "../", "/")):
-                external.add(spec)
-                warnings.append(
-                    f"{current.relative_to(root).as_posix()} imports '{spec}', left external. "
-                    "Limbo does not bundle npm packages or claim they are browser-ready."
-                )
+                try:
+                    target = resolver.resolve(spec, current).path
+                except FrontendError:
+                    external.add(spec)
+                    warnings.append(
+                        f"{current.relative_to(root).as_posix()} imports '{spec}', left external. "
+                        "The package is not installed in this project's node_modules. "
+                        "Limbo does not download it or insert a CDN URL."
+                    )
+                    continue
+                pending.append(target)
                 continue
             try:
                 target = resolver.resolve(spec, current).path
@@ -336,12 +361,19 @@ def _rewrite_js(text: str, path: Path, root: Path, resolver: ModuleResolver, nam
     links: list[str] = []
     for ref in scan.imports:
         spec = ref.specifier
-        if not spec.startswith(("./", "../", "/")):
+        bare = not spec.startswith(("./", "../", "/", "#"))
+        if bare:
+            try:
+                target = resolver.resolve(spec, path).path
+            except FrontendError:
+                continue
+        elif spec.startswith(("./", "../", "/")):
+            try:
+                target = resolver.resolve(spec, path).path
+            except FrontendError as exc:
+                raise BuildError(str(exc)) from exc
+        else:
             continue
-        try:
-            target = resolver.resolve(spec, path).path
-        except FrontendError as exc:
-            raise BuildError(str(exc)) from exc
         if target.suffix.lower() == ".css":
             if ref.kind != "side-effect":
                 raise BuildError(

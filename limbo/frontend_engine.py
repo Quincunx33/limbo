@@ -80,7 +80,9 @@ class BrowserNativeAdapter:
             scan_source = re.sub(r"(?m)^\s*//.*$", "", scan_source)
             if re.search(r"\bmodule\.exports\b|^\s*exports\.[A-Za-z_$][\w$]*\s*=|\brequire\s*\(", scan_source, re.MULTILINE):
                 raise AdapterError(
-                    f"CommonJS module {path.name} needs a bundler; direct browser-module serving is not supported yet"
+                    f"CommonJS module {path.name} is not browser ESM. "
+                    "Install esbuild in the frontend project with `npm install --save-dev esbuild` "
+                    "so Limbo can transform it locally. Limbo does not download a compiler or a CDN build."
                 )
         loader = "css" if path.suffix.lower() == ".css" else "js"
         return TransformResult(code=code, loader=loader)
@@ -100,12 +102,16 @@ class EsbuildAdapter:
         reason="Requires a locally installed esbuild executable; no automatic installation.",
     )
 
-    def __init__(self, project_root: str | Path, executable: str | None = None, *, jsx_import_source: str = "react") -> None:
+    def __init__(self, project_root: str | Path, executable: str | None = None, *, jsx_import_source: str = "react",
+                 jsx_runtime: str = "automatic") -> None:
         self.root = Path(project_root).expanduser().resolve()
         local_name = "esbuild.cmd" if __import__("os").name == "nt" else "esbuild"
         local = self.root / "node_modules" / ".bin" / local_name
         self.executable = executable or (str(local) if local.is_file() else shutil.which("esbuild"))
         self.jsx_import_source = jsx_import_source
+        if jsx_runtime not in ("automatic", "classic"):
+            raise AdapterError("jsx runtime must be 'automatic' or 'classic'")
+        self.jsx_runtime = jsx_runtime
 
     def detect(self) -> bool:
         return bool(self.executable)
@@ -131,8 +137,12 @@ class EsbuildAdapter:
                 source = path.read_text(encoding="utf-8")
             except (OSError, UnicodeError) as exc:
                 raise AdapterError(f"cannot read {path}: {exc}") from exc
+        if self.jsx_runtime == "classic":
+            jsx_args = ["--jsx=transform"]
+        else:
+            jsx_args = ["--jsx=automatic", "--jsx-import-source=" + self.jsx_import_source]
         args = [self.executable, "--loader=" + loader, "--format=esm", "--target=es2020",
-                "--jsx=automatic", "--jsx-import-source=" + self.jsx_import_source, "--sourcemap=inline", "--sourcefile=" + path.name, "--log-level=error"]
+                *jsx_args, "--sourcemap=inline", "--sourcefile=" + path.name, "--log-level=error"]
         try:
             result = subprocess.run(
                 args, cwd=self.root, input=source, text=True, capture_output=True,

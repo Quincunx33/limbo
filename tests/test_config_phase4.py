@@ -39,5 +39,14 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError,"LIMBO_APP_DEBUG"): load_config("missing.toml",environ={"LIMBO_APP_DEBUG":"maybe"})
     def test_bad_cli_override(self):
         with self.assertRaisesRegex(ConfigError,"Unknown CLI override"): load_config("missing.toml",environ={},overrides={"server":{"bind":"x"}})
+    def test_frontend_runtime_keys_validate(self):
+        source='''[frontend]\nruntime_modules="local"\nmodule_url_prefix="/_limbo_modules"\nallow_remote_imports=false\njsx_runtime="automatic"\njsx_import_source="preact"\n'''
+        with tempfile.TemporaryDirectory() as d:
+            config=load_config(self.write(d,source),environ={})
+        self.assertEqual(config.frontend.get("jsx_import_source"),"preact")
+        self.assertFalse(config.frontend.get("allow_remote_imports"))
+        for bad in ('[frontend]\nruntime_modules="cdn"\n','[frontend]\nmodule_url_prefix="/a/b"\n','[frontend]\njsx_runtime="babel"\n'):
+            with tempfile.TemporaryDirectory() as d:
+                with self.assertRaises(ConfigError): load_config(self.write(d,bad),environ={})
 
 if __name__=="__main__": unittest.main()

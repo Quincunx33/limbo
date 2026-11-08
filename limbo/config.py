@@ -1,6 +1,7 @@
 """Typed, dependency-free project configuration for Limbo."""
 from __future__ import annotations
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -35,7 +36,9 @@ class LimboConfig:
 _SCHEMA = {
  "app": {"name":str,"debug":bool,"environment":str},
  "server": {"host":str,"port":int,"workers":int,"backlog":int,"request_timeout":(int,float),"max_body_bytes":int},
- "frontend": {"directory":str,"entry":str,"framework":str,"compiler":str,"source_maps":bool},
+ "frontend": {"directory":str,"entry":str,"framework":str,"compiler":str,"source_maps":bool,
+              "runtime_modules":str,"module_url_prefix":str,"allow_remote_imports":bool,
+              "jsx_import_source":str,"jsx_runtime":str},
  "build": {"out_dir":str,"minify":bool,"sourcemap":bool,"clean":bool,"target":str,"base":str},
  "static": {"url_prefix":str,"directory":str,"spa_fallback":bool,"directory_indexes":bool,"max_age":int},
  "security": {"trusted_hosts":list,"csrf":bool,"secure_cookies":bool,"max_upload_bytes":int,"max_upload_files":int},
@@ -84,6 +87,14 @@ def _validate(section,key,value,kind):
         raise ConfigError("[build].base must start and end with '/' and must not contain '..'")
     if key=="config" and section=="tunnel" and not value.strip():
         raise ConfigError("[tunnel].config must not be empty")
+    if section=="frontend" and key=="runtime_modules" and value!="local":
+        raise ConfigError("[frontend].runtime_modules must be \"local\"; Limbo does not fetch remote runtimes")
+    if section=="frontend" and key=="module_url_prefix" and not re.fullmatch(r"/[A-Za-z0-9_-]+", value):
+        raise ConfigError("[frontend].module_url_prefix must be one URL segment such as /_limbo_modules")
+    if section=="frontend" and key=="jsx_runtime" and value not in ("automatic", "classic"):
+        raise ConfigError("[frontend].jsx_runtime must be \"automatic\" or \"classic\"")
+    if section=="frontend" and key=="jsx_import_source" and not re.fullmatch(r"[A-Za-z0-9@/_.-]+", value):
+        raise ConfigError("[frontend].jsx_import_source must be a package specifier")
     if key in ("workers","backlog","max_upload_files") and value<=0: raise ConfigError(f"[{section}].{key} must be positive")
     if key in ("max_body_bytes","max_upload_bytes","max_age") and value<0: raise ConfigError(f"[{section}].{key} cannot be negative")
     if key in ("request_timeout","timeout") and value<=0: raise ConfigError(f"[{section}].{key} must be greater than zero")

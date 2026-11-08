@@ -102,6 +102,31 @@ class BuildTests(unittest.TestCase):
             html = (report.out_dir / "index.html").read_text(encoding="utf-8")
             self.assertIn("/app/assets/", html)
 
+    def test_installed_esm_package_is_vendored_without_a_cdn(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            _project(root)
+            frontend = root / "frontend"
+            (frontend / "src" / "main.js").write_text(
+                'import { tag } from "local-ui";\ndocument.body.textContent = tag("Limbo");\n',
+                encoding="utf-8",
+            )
+            package = frontend / "node_modules" / "local-ui"
+            package.mkdir(parents=True)
+            (package / "package.json").write_text(
+                '{"name":"local-ui","exports":{".":"./index.js"}}', encoding="utf-8"
+            )
+            (package / "index.js").write_text(
+                'export function tag(name){ return "local:" + name; }\n', encoding="utf-8"
+            )
+            report = build_project(root)
+            self.assertEqual(report.manifest["external"], [])
+            javascript = "\n".join(path.read_text(encoding="utf-8") for path in report.out_dir.rglob("*.js"))
+            self.assertIn("local:", javascript)
+            self.assertNotIn('from "local-ui"', javascript)
+            self.assertNotIn("unpkg.com", javascript)
+            self.assertNotIn("esm.sh", javascript)
+
 
 if __name__ == "__main__":
     unittest.main()

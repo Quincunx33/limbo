@@ -463,11 +463,23 @@ class DependencyGraph:
 
 class FrontendCompiler:
     """Orchestrate optional local compiler binaries; never installs tools."""
-    def __init__(self, project_root: str | os.PathLike[str]) -> None:
+    def __init__(self, project_root: str | os.PathLike[str], *, jsx_import_source: str = "react",
+                 jsx_runtime: str = "automatic") -> None:
         self.root = Path(project_root).expanduser().resolve(strict=True)
         local = self.root / "node_modules" / ".bin" / ("esbuild.cmd" if os.name == "nt" else "esbuild")
         self.esbuild = str(local) if local.exists() else shutil.which("esbuild")
         self.node = shutil.which("node")
+        if jsx_runtime not in ("automatic", "classic"):
+            raise FrontendError("jsx runtime must be 'automatic' or 'classic'")
+        if not isinstance(jsx_import_source, str) or not re.fullmatch(r"[A-Za-z0-9@/_.-]+", jsx_import_source):
+            raise FrontendError("jsx import source must be a package specifier")
+        self.jsx_import_source = jsx_import_source
+        self.jsx_runtime = jsx_runtime
+
+    def _jsx_args(self) -> list[str]:
+        if self.jsx_runtime == "classic":
+            return ["--jsx=transform"]
+        return ["--jsx=automatic", "--jsx-import-source=" + self.jsx_import_source]
 
     def doctor(self) -> dict[str, Any]:
         found = {"esbuild": self.esbuild, "node": self.node}
@@ -475,7 +487,7 @@ class FrontendCompiler:
             found[package] = self._node_package_path(package)
         return found
 
-    def transform(self, path: str | os.PathLike[str], *, jsx_import_source: str = "react") -> str:
+    def transform(self, path: str | os.PathLike[str], *, jsx_import_source: str | None = None) -> str:
         source_path = Path(path).resolve(strict=True)
         try: source_path.relative_to(self.root)
         except ValueError as exc: raise FrontendError("Source module is outside the frontend project") from exc
@@ -485,17 +497,25 @@ class FrontendCompiler:
             scan_source = re.sub(r"/\*[\s\S]*?\*/", "", source)
             scan_source = re.sub(r"(?m)^\s*//.*$", "", scan_source)
             if re.search(r"\bmodule\.exports\b|^\s*exports\.[A-Za-z_$][\w$]*\s*=|\brequire\s*\(", scan_source, re.MULTILINE):
-                raise FrontendError(f"CommonJS module {source_path.name} needs a bundler; direct browser-module serving is not supported yet")
+                raise FrontendError(
+                    f"CommonJS module {source_path.name} is not browser ESM. "
+                    "Install esbuild in the frontend project with `npm install --save-dev esbuild` "
+                    "so Limbo can transform it locally."
+                )
             return source
         if suffix in (".vue", ".svelte"):
             original = source_path.read_text(encoding="utf-8")
             source = self._compile_sfc(source_path)
             if self.esbuild and re.search(r"<script\b[^>]*\blang\s*=\s*(['\"])ts\1", original):
-                return self._esbuild_stdin(source, "tsx", source_path, jsx_import_source)
+                return self._esbuild_stdin(source, "tsx", source_path, jsx_import_source or self.jsx_import_source)
             return source
         loader = {".ts": "ts", ".tsx": "tsx", ".jsx": "jsx", ".json": "json"}.get(suffix)
         if loader in ("ts", "tsx", "jsx"):
-            adapter = EsbuildAdapter(self.root, executable=self.esbuild, jsx_import_source=jsx_import_source)
+            adapter = EsbuildAdapter(
+                self.root, executable=self.esbuild,
+                jsx_import_source=jsx_import_source or self.jsx_import_source,
+                jsx_runtime=self.jsx_runtime,
+            )
             try:
                 return adapter.transform(source_path).code
             except AdapterError as exc:
@@ -513,8 +533,13 @@ class FrontendCompiler:
 
     def _esbuild_stdin(self, source: str, loader: str, source_path: Path, jsx_import_source: str,
                        *, source_map: bool = False) -> str:
-        args = [self.esbuild, "--loader=" + loader, "--format=esm", "--target=es2020", "--jsx=automatic",
-                "--jsx-import-source=" + jsx_import_source, "--sourcefile=" + source_path.name, "--log-level=error"]
+        source_name = jsx_import_source or self.jsx_import_source
+        if self.jsx_runtime == "classic":
+            jsx_args = ["--jsx=transform"]
+        else:
+            jsx_args = ["--jsx=automatic", "--jsx-import-source=" + source_name]
+        args = [self.esbuild, "--loader=" + loader, "--format=esm", "--target=es2020",
+                *jsx_args, "--sourcefile=" + source_path.name, "--log-level=error"]
         if source_map:
             args.append("--sourcemap=inline")
         try:
@@ -555,6 +580,71 @@ class FrontendCompiler:
             raise FrontendError(f"{package} compiler returned an invalid source map")
         return code, source_map
 
+    def package_fingerprint(self, source_path: Path) -> str:
+        """Hash the owning package's JS/JSON so a dependency edit invalidates the cache."""
+        root = source_path.parent
+        for parent in (source_path.parent, *source_path.parents):
+            if parent == self.root or parent == self.root.parent:
+                break
+            if (parent / "package.json").is_file():
+                root = parent
+                break
+        digest = hashlib.sha256()
+        files = [path for path in root.rglob("*") if path.is_file() and path.suffix.lower() in {".js", ".mjs", ".cjs", ".json"}]
+        for path in sorted(files, key=lambda item: item.as_posix()):
+            try:
+                digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+                digest.update(path.read_bytes())
+            except OSError:
+                digest.update(b"|unreadable")
+        return digest.hexdigest()[:20]
+
+    def bundle_browser_esm(self, source_path: Path) -> str:
+        """Turn one CommonJS entry into browser ESM with a local esbuild.
+
+        Other packages stay external so the import map can serve them. Node
+        built-ins fail the build instead of being rewritten to a CDN.
+        """
+        source_path = Path(source_path).resolve(strict=True)
+        try:
+            source_path.relative_to(self.root)
+        except ValueError as exc:
+            raise FrontendError("Source module is outside the frontend project") from exc
+        if not self.esbuild:
+            raise FrontendError(
+                f"CommonJS module {source_path.name} is not browser ESM. "
+                "Install esbuild in the frontend project with `npm install --save-dev esbuild`. "
+                "Limbo does not download compilers or fetch a remote build."
+            )
+        out_dir = self.root / ".limbo" / "cache" / "cjs"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stamp = self.package_fingerprint(source_path) + "-" + hashlib.sha256(str(source_path).encode("utf-8")).hexdigest()[:12]
+        outfile = out_dir / (stamp + ".js")
+        args = [self.esbuild, str(source_path), "--bundle", "--format=esm", "--platform=browser",
+                "--target=es2020", "--packages=external", "--log-level=error", "--outfile=" + str(outfile)]
+        try:
+            result = subprocess.run(args, cwd=self.root, text=True, capture_output=True, timeout=60, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise FrontendError(f"esbuild could not compile {source_path.name}: {exc}") from exc
+        if result.returncode or not outfile.is_file():
+            outfile.unlink(missing_ok=True)
+            detail = (result.stderr or result.stdout or "").strip()
+            raise FrontendError(
+                f"esbuild could not turn CommonJS module {source_path.name} into browser ESM:\n{detail}\n"
+                "Node built-ins and native addons cannot be served to the browser."
+            )
+        try:
+            outfile.resolve().relative_to(self.root)
+        except ValueError as exc:
+            raise FrontendError("esbuild output escaped the frontend project") from exc
+        text = outfile.read_text(encoding="utf-8")
+        text = _lift_commonjs_interop(text)
+        if re.search(r"""(?:\bfrom\s*|\bimport\s*\(|\bimport\s+)['"]https?:\/\/""", text) or re.search(
+            r"https?://(?:unpkg\.com|cdn\.jsdelivr\.net|esm\.sh)/", text, re.IGNORECASE
+        ):
+            raise FrontendError(f"Refusing to serve {source_path.name}: the local transform contained a remote module URL")
+        return text
+
     def _node_package_path(self, package: str) -> str | None:
         for start in (self.root, *self.root.parents):
             manifest = start / "node_modules" / package / "package.json"
@@ -562,23 +652,67 @@ class FrontendCompiler:
         return None
 
 
+def _lift_commonjs_interop(text: str) -> str:
+    """Turn esbuild's CJS interop into browser ESM imports and named exports.
+
+    esbuild emits ``export default`` plus ``__require("pkg")`` for external
+    CommonJS dependencies. Browsers need real import statements and static
+    named exports, or ``import { createRoot } from "react-dom/client"`` fails.
+    """
+    specs: list[str] = []
+
+    def repl(match: re.Match[str]) -> str:
+        spec = match.group(2)
+        if spec not in specs:
+            specs.append(spec)
+        return f"__limbo_ext_{specs.index(spec)}"
+
+    text = re.sub(r"""__require\(\s*(['"])([^'"]+)\1\s*\)""", repl, text)
+    if specs:
+        header = "".join(
+            f"import __limbo_ext_{index} from {json.dumps(spec)};\n"
+            for index, spec in enumerate(specs)
+        )
+        text = header + text
+    match = re.search(r"^export default ([A-Za-z_$][\w$]*)\(\);\s*$", text, re.MULTILINE)
+    if not match:
+        return text
+    names: list[str] = []
+    for name in re.findall(r"\bexports\.([A-Za-z_$][\w$]*)\s*=", text):
+        if name in names or name in _JS_RESERVED_WORDS or not name.isidentifier():
+            continue
+        names.append(name)
+    binding = match.group(1)
+    replacement = f"const __limbo_ns = {binding}();\nexport default __limbo_ns;\n"
+    replacement += "".join(f"export const {name} = __limbo_ns.{name};\n" for name in names)
+    return text[:match.start()] + replacement + text[match.end():]
+
+
 class FrontendDevServer:
     """Serve a local source tree and compiler output under one URL prefix."""
     def __init__(self, project_root: str | os.PathLike[str], *, url_prefix: str = "/__limbo",
-                 allow_remote: bool = False) -> None:
+                 allow_remote: bool = False, module_namespace: str = "/_limbo_modules",
+                 jsx_import_source: str = "react", jsx_runtime: str = "automatic") -> None:
         self.root = Path(project_root).expanduser().resolve(strict=True)
         normalized_prefix = url_prefix.strip("/")
         if normalized_prefix and not re.fullmatch(r"[A-Za-z0-9/_-]+", normalized_prefix):
             raise ValueError("Frontend URL prefix may contain only letters, digits, slash, underscore, and hyphen")
         self.prefix = "/" + normalized_prefix
         if self.prefix == "/": raise ValueError("Frontend URL prefix cannot be root")
+        namespace = module_namespace.strip()
+        if not namespace.startswith("/"):
+            namespace = "/" + namespace
+        if not re.fullmatch(r"/[A-Za-z0-9_-]+", namespace):
+            raise ValueError("Frontend module namespace must be one URL segment, for example /_limbo_modules")
+        self.module_namespace = namespace
         self.resolver = ModuleResolver(self.root)
         self.allow_remote = allow_remote
         self.graph = DependencyGraph(self.resolver, allow_remote=allow_remote)
-        self.compiler = FrontendCompiler(self.root)
+        self.compiler = FrontendCompiler(self.root, jsx_import_source=jsx_import_source, jsx_runtime=jsx_runtime)
         self.registry = AdapterRegistry((
             BrowserNativeAdapter(),
-            EsbuildAdapter(self.root, executable=self.compiler.esbuild),
+            EsbuildAdapter(self.root, executable=self.compiler.esbuild, jsx_import_source=jsx_import_source,
+                           jsx_runtime=jsx_runtime),
             FrameworkSFCAdapter(self.root, "vue"),
             FrameworkSFCAdapter(self.root, "svelte"),
         ))
@@ -596,7 +730,7 @@ class FrontendDevServer:
             for specifier in self.graph.bare_imports.get(source, ()):
                 target = self.resolver.resolve(specifier, source).path
                 imports[specifier] = self._module_url(target)
-        return {"imports": imports}
+        return {"imports": dict(sorted(imports.items()))}
 
     def script_tag(self, entry: str) -> str:
         import_map = json.dumps(self.import_map(entry), separators=(",", ":")).replace("</", "<\\/")
@@ -686,21 +820,10 @@ poll();setInterval(poll,1200);
                       "link.rel = 'stylesheet'; link.href = " + json.dumps(css_url) + ";\n"
                       "document.head.appendChild(link);\n")
                 return Response(js, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
-            if relative.startswith("_pkgfile/"):
-                decoded_package_path = unquote(relative[len("_pkgfile/"):])
-                module_path = (self.root / decoded_package_path).resolve(strict=True)
-                if not module_path.is_relative_to(self.root / "node_modules") or module_path not in self._allowed_modules:
-                    return Response.text("Frontend module not found", 404)
-                if module_path.suffix.lower() in (".js", ".mjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte"):
-                    content = self._rewrite_internal_imports(self._transform_cached(module_path), module_path)
-                    return Response(content, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
-                if module_path.suffix.lower() in (".css", ".svg", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico",
-                                                    ".woff", ".woff2", ".ttf", ".wasm", ".mp3", ".mp4"):
-                    if module_path.suffix.lower() == ".css":
-                        content = self._rewrite_css_imports(module_path.read_text(encoding="utf-8"), module_path)
-                        return Response(content, 200, {"Content-Type": "text/css; charset=utf-8", "Cache-Control": "no-store"})
-                    return Response(module_path.read_bytes(), 200, {"Content-Type": _mime(module_path), "Cache-Control": "no-store"})
-                return Response.text("Frontend package asset type is not supported", 404)
+            if relative.startswith(self.module_namespace.strip("/") + "/") or relative.startswith("_pkgfile/"):
+                legacy = relative.startswith("_pkgfile/")
+                decoded_package_path = unquote(relative[len("_pkgfile/"):] if legacy else relative[len(self.module_namespace.strip("/") + "/"):])
+                return self._serve_package_request(decoded_package_path, legacy=legacy)
             decoded = unquote(relative)
             if any(part.startswith(".") or part == "node_modules" for part in Path(decoded).parts):
                 return Response.text("Frontend path is not publicly served", 404)
@@ -748,11 +871,7 @@ poll();setInterval(poll,1200);
         snapshot: dict[str, str] = {}
         for path in self._allowed_modules:
             resolved = path.resolve()
-            relative = resolved.relative_to(self.root).as_posix()
-            if relative.startswith("node_modules/"):
-                url = self.prefix + "/_pkgfile/" + quote(relative, safe="/@._-")
-            else:
-                url = self.prefix + "/" + quote(relative, safe="/@._-")
+            url = self._module_url(resolved)
             try:
                 fingerprint = hashlib.sha256(resolved.read_bytes()).hexdigest()
             except OSError:
@@ -1027,30 +1146,58 @@ poll();setInterval(poll,1200);
                 except OSError:
                     tool_identity += f"|{package}:unreadable"
         options = {"path": relative, "suffix": resolved.suffix.lower(), "tool": tool_identity}
+        if "/node_modules/" in f"/{relative}":
+            options["package"] = self.compiler.package_fingerprint(resolved)
         key = self.cache.key(source, compiler="limbo-frontend-transform-v1", options=options)
         cached = self.cache.get(key)
         if cached is not None:
             return cached
         adapter = self.registry.select(resolved.suffix)
-        if adapter is not None:
-            try:
+        try:
+            if adapter is not None:
                 transformed = adapter.transform(resolved).code
-            except AdapterError as exc:
-                raise FrontendError(str(exc)) from exc
-        else:
-            # JSON and future non-adapter assets retain the compiler's explicit
-            # fallback diagnostics rather than being silently passed through.
-            transformed = self.compiler.transform(resolved)
+            else:
+                transformed = self.compiler.transform(resolved)
+        except (AdapterError, FrontendError) as exc:
+            if "CommonJS module" not in str(exc):
+                if isinstance(exc, AdapterError):
+                    raise FrontendError(str(exc)) from exc
+                raise
+            transformed = self.compiler.bundle_browser_esm(resolved)
         self.cache.put(key, transformed)
         return transformed
 
     def _source_for_graph(self, path: Path) -> str:
+        return self._transform_cached(path)
+
+    def _serve_package_request(self, decoded: str, *, legacy: bool) -> Response:
+        if not decoded or "\x00" in decoded or decoded.startswith(("/", "\\")):
+            return Response.text("Frontend module not found", 404)
+        parts = Path(decoded).parts
+        if any(part in ("", ".", "..") for part in parts):
+            return Response.text("Frontend module not found", 404)
+        candidate = (self.root / decoded) if legacy else (self.root / "node_modules" / decoded)
         try:
-            return self._transform_cached(path)
-        except FrontendError as exc:
-            if "CommonJS module" in str(exc):
-                return path.read_text(encoding="utf-8")
-            raise
+            module_path = candidate.resolve(strict=True)
+        except (OSError, RuntimeError):
+            return Response.text("Frontend module not found", 404)
+        try:
+            module_path.relative_to((self.root / "node_modules").resolve())
+        except ValueError:
+            return Response.text("Frontend module not found", 404)
+        if module_path not in self._allowed_modules:
+            return Response.text("Frontend module not found", 404)
+        suffix = module_path.suffix.lower()
+        if suffix in (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".vue", ".svelte"):
+            content = self._rewrite_internal_imports(self._transform_cached(module_path), module_path)
+            return Response(content, 200, {"Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store"})
+        if suffix in (".css", ".svg", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico",
+                      ".woff", ".woff2", ".ttf", ".wasm", ".mp3", ".mp4"):
+            if suffix == ".css":
+                content = self._rewrite_css_imports(module_path.read_text(encoding="utf-8"), module_path)
+                return Response(content, 200, {"Content-Type": "text/css; charset=utf-8", "Cache-Control": "no-store"})
+            return Response(module_path.read_bytes(), 200, {"Content-Type": _mime(module_path), "Cache-Control": "no-store"})
+        return Response.text("Frontend package asset type is not supported", 404)
 
     def _module_url(self, path: Path) -> str:
         resolved = path.resolve(strict=True)
@@ -1058,7 +1205,8 @@ poll();setInterval(poll,1200);
         self._allowed_modules.add(resolved)
         relative = resolved.relative_to(self.root).as_posix()
         if relative.startswith("node_modules/"):
-            return self.prefix + "/_pkgfile/" + quote(relative, safe="/@._-")
+            package_path = relative[len("node_modules/"):]
+            return self.prefix + self.module_namespace + "/" + quote(package_path, safe="/@._-")
         return self.prefix + "/" + quote(relative, safe="/@._-")
 
 
