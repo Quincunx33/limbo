@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1 — 2026-11-23
+
+- Added the optional native Manus Tunnel client with Ed25519 authentication, HTTP/WebSocket forwarding, heartbeat reconnects, CLI support, and `cryptography` extra.
+
 ## 1.0.0 — 2026-11-08
 
 - Added `macos-latest` to the GitHub Actions platform smoke-test matrix.

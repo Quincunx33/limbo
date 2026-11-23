@@ -22,7 +22,7 @@ from .manus_tunnel import ManusTunnelClient, ManusTunnelError
 from .runtime_ssr import LocalProcessRuntime, SsrRuntimeError
 from .capabilities import capability_matrix
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 __all__ = ["Limbo", "Router", "RouteGroup", "Request", "Response", "HTTPError", "Database", "SessionSigner",
            "Session", "SessionBackend", "SessionStore", "session_middleware", "csrf_protect", "BackgroundTasks", "authenticate", "authorize", "TemplateEngine", "UploadFile", "UploadLimitError", "DependencyGraph",
            "FrontendCompiler", "FrontendDevServer", "FrontendError", "ModuleResolver", "hash_password",
