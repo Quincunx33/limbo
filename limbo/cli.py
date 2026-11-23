@@ -20,6 +20,7 @@ from .build_engine import BuildError, build_project
 from .tunnel import (
     TunnelError, cloudflared_version, detect_cloudflared, exposure_warnings, missing_tool_message, plan_delete, prepare_quick_tunnel,
 )
+from .manus_tunnel import ManusTunnelClient, ManusTunnelError
 
 
 def _create(name: str, template: str = "python-api") -> int:
@@ -149,6 +150,12 @@ def main(argv: list[str] | None = None) -> int:
     tunnel_sub.add_parser("preflight", help="explain public exposure and tool detection")
     delete = tunnel_sub.add_parser("delete", help="delete a named tunnel only when confirmed")
     delete.add_argument("name"); delete.add_argument("--confirm", action="store_true")
+    manus = tunnel_sub.add_parser("manus", help="run the native Manus Tunnel client")
+    manus.add_argument("--url", required=True, help="wss:// Manus tunnel endpoint")
+    manus.add_argument("--client-id", required=True)
+    manus.add_argument("--key", required=True, help="PEM Ed25519 private-key path")
+    manus.add_argument("--local-origin", default="http://127.0.0.1:8000")
+    manus.add_argument("--no-reconnect", action="store_true")
     args = parser.parse_args(argv)
     if args.command == "create": return _create(args.name, args.template)
     if args.command in ("add", "remove"):
@@ -217,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Limbo {__version__}\nCore: Python standard library only\nHTTP server: built-in threaded TCP implementation")
         return 0
     if args.command == "dependencies":
-        print("Required: none (Python standard library only)\nBuilt-in: SQLite migrations, uploads, templates, auth primitives, WebSocket, local module resolver, production build for browser-native assets\nOptional frontend compilers: esbuild, @vue/compiler-sfc, svelte (detected, never installed)\nOptional tunnel: official cloudflared executable (detected, never downloaded)")
+        print("Required: none (Python standard library only)\nBuilt-in: SQLite migrations, uploads, templates, auth primitives, WebSocket, local module resolver, production build for browser-native assets\nOptional frontend compilers: esbuild, @vue/compiler-sfc, svelte (detected, never installed)\nOptional tunnels: official cloudflared executable (detected, never downloaded); cryptography for native Manus Tunnel")
         return 0
     if args.command == "doctor":
         try:
@@ -280,6 +287,21 @@ def main(argv: list[str] | None = None) -> int:
         print(" ".join(argv))
         print("Limbo printed the confirmed cloudflared command and did not execute it.")
         return 0
+    if args.command == "tunnel" and args.tunnel_command == "manus":
+        client = None
+        try:
+            client = ManusTunnelClient.from_private_key(args.url, args.client_id, args.key, local_origin=args.local_origin, reconnect=not args.no_reconnect)
+            print(f"Limbo Manus Tunnel client connected to {args.url} for {args.local_origin} (Ctrl+C to stop)")
+            client.run_forever()
+            return 0
+        except KeyboardInterrupt:
+            return 0
+        except (OSError, RuntimeError, ManusTunnelError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
+        finally:
+            if client is not None:
+                client.stop()
     if args.command == "frontend" and args.frontend_command == "capabilities":
         try:
             registry = AdapterRegistry((BrowserNativeAdapter(), EsbuildAdapter(args.directory), FrameworkSFCAdapter(args.directory, "vue"), FrameworkSFCAdapter(args.directory, "svelte")) )

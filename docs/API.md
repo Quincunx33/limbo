@@ -64,6 +64,8 @@ from limbo import build_project, TunnelSupervisor
 
 `TunnelSupervisor` builds `cloudflared` arguments and redacts logs. It does not download a binary. Destructive delete still requires `--confirm`.
 
+`ManusTunnelClient` is the optional native client for the Limbo Tunnel server. Install `.[manus-tunnel]`, enroll an Ed25519 identity with `ManusTunnelClient.enroll(...)`, then run `client.run_forever()` or `limbo tunnel manus ...` to forward HTTP and WebSocket traffic from a registered Manus hostname to the local Limbo server.
+
 ## Capability matrix
 
 ```python

@@ -18,6 +18,7 @@ from .middleware import access_log, cors, gzip_compress, rate_limit, request_id,
 from .migrations import DatabaseURLError, Migration, MigrationError, Migrator, load_directory, open_database
 from .build_engine import BuildError, BuildReport, build_project
 from .tunnel import TunnelError, TunnelSupervisor, detect_cloudflared, redact_secrets
+from .manus_tunnel import ManusTunnelClient, ManusTunnelError
 from .runtime_ssr import LocalProcessRuntime, SsrRuntimeError
 from .capabilities import capability_matrix
 
@@ -30,4 +31,4 @@ __all__ = ["Limbo", "Router", "RouteGroup", "Request", "Response", "HTTPError", 
            "BrowserNativeAdapter", "CompilerAdapter", "EsbuildAdapter", "FrameworkSFCAdapter", "TransformResult",
            "Migration", "Migrator", "MigrationError", "DatabaseURLError", "load_directory", "open_database",
            "BuildError", "BuildReport", "build_project", "TunnelError", "TunnelSupervisor", "detect_cloudflared",
-           "redact_secrets", "LocalProcessRuntime", "SsrRuntimeError", "capability_matrix", "__version__"]
+           "redact_secrets", "ManusTunnelClient", "ManusTunnelError", "LocalProcessRuntime", "SsrRuntimeError", "capability_matrix", "__version__"]

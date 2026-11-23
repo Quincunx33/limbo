@@ -13,6 +13,9 @@ authors = [{name = "Limbo contributors"}]
 classifiers = ["Programming Language :: Python :: 3", "Topic :: Internet :: WWW/HTTP :: WSGI :: Application"]
 dependencies = []
 
+[project.optional-dependencies]
+manus-tunnel = ["cryptography>=41"]
+
 [project.scripts]
 limbo = "limbo.cli:main"
 
