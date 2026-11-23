@@ -7,8 +7,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/RELEASE-1.0.0-orange?style=for-the-badge" alt="Version 1.0.0" />
-  <img src="https://img.shields.io/badge/version-1.0.0-blue" alt="Version 1.0.0" />
+  <img src="https://img.shields.io/badge/RELEASE-1.0.1-orange?style=for-the-badge" alt="Version 1.0.1" />
+  <img src="https://img.shields.io/badge/version-1.0.1-blue" alt="Version 1.0.1" />
   <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+" />
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" />
 </p>
@@ -23,9 +23,9 @@
 ---
 
 > [!WARNING]
-> **1.0.0 RELEASE — Limbo**
+> **1.0.1 RELEASE — Limbo**
 >
-> Limbo is versioned as 1.0.0, but it remains under active development and is **not production-certified**. Features, APIs, and behavior may change without a compatibility guarantee. Some roadmap phases remain open, and some integrations are experimental or unsupported. Use it for evaluation and testing; do not assume production readiness. Review the status, capability matrix, threat model, and release checklist before deployment.
+> Limbo is versioned as 1.0.1, but it remains under active development and is **not production-certified**. Features, APIs, and behavior may change without a compatibility guarantee. Some roadmap phases remain open, and some integrations are experimental or unsupported. Use it for evaluation and testing; do not assume production readiness. Review the status, capability matrix, threat model, and release checklist before deployment.
 
 ## What is Limbo?
 
@@ -36,7 +36,7 @@ It combines a lightweight HTTP server and routing layer with backend building bl
 - **PyPI distribution name:** `limbo33`
 - **Python import package:** `limbo`
 - **CLI command:** `limbo`
-- **Current development version:** `1.0.0`
+- **Current development version:** `1.0.1`
 - **Python:** `3.10+`
 - **License:** MIT
 
@@ -60,6 +60,26 @@ For local development from a cloned repository, install the project in editable 
 ```bash
 python -m pip install -e .
 ```
+
+### Optional Manus Tunnel client
+
+To share a local Limbo project temporarily through a compatible Manus Tunnel server, install the optional client extra:
+
+```bash
+python -m pip install "limbo33[manus-tunnel]"
+```
+
+The extra adds Ed25519 signing support; the normal `limbo33` installation remains dependency-free. Enroll a client with a one-time token, register its public hostname on the tunnel server, and start the client with:
+
+```bash
+limbo tunnel manus \
+  --url wss://tunnel.example.com/tunnel \
+  --client-id my-limbo-project \
+  --key .limbo/manus-ed25519.pem \
+  --local-origin http://127.0.0.1:8000
+```
+
+See the [Manus Tunnel guide](docs/MANUS_TUNNEL.md) for enrollment, hostname routing, HTTP/WebSocket forwarding, reconnects, and deployment security. Keep the private key out of source control and retain bearer-token protection on the tunnel server's admin APIs.
 
 ## Get started
 
@@ -189,6 +209,7 @@ Limbo detects optional tools; it does **not** install packages, download compile
 | `limbo add PACKAGE` | Add a frontend package declaration |
 | `limbo remove PACKAGE` | Remove a frontend package declaration |
 | `limbo tunnel preflight` | Check optional tunnel prerequisites |
+| `limbo tunnel manus` | Connect a local app to a Manus Tunnel server |
 
 **Important:** `limbo add` and `limbo remove` edit package metadata only. They do not run npm or install dependencies.
 
@@ -284,7 +305,7 @@ python -m pytest -q \
 
 If `node_modules/.bin` is not on `PATH`, the TypeScript and JSX browser subtests are skipped with `Local esbuild is not installed`, even when the package exists locally. A passing test suite is useful evidence, but it is not a security certification or a guarantee for every operating system and deployment environment.
 
-GitHub Actions runs the platform smoke tests on Ubuntu, Windows, and `macos-latest`. The macOS job is included in the workflow for 1.0.0 verification; its hosted result must be green before macOS support is considered verified.
+GitHub Actions runs the platform smoke tests on Ubuntu, Windows, and `macos-latest`. The macOS job is included in the workflow for 1.0.1 verification; its hosted result must be green before macOS support is considered verified.
 
 ## Current development status
 
@@ -301,7 +322,7 @@ Limbo is not feature-complete. The status ledger is the source of truth and reco
 | 6 | Browser-native production build, including vendored local ESM; code splitting remains unsupported |
 | 7 | Preact, Lit and React are optional local fixtures. Next, Nuxt, SvelteKit, Remix, Angular, Astro, Qwik and Solid are not |
 | 8 | SQLite complete; PostgreSQL/MySQL unsupported |
-| 9 | Optional binary integration; no tunnel protocol implementation or binary download |
+| 9 | Manus Tunnel client integration is available as an optional package extra; no binary download |
 | 10 | Open — project hardening and release work remain |
 
 These labels describe the current repository evidence, not a promise that every feature is production-ready. See the detailed [roadmap/status ledger](docs/STATUS.md).
@@ -328,6 +349,7 @@ The optional tunnel workflow requires an official `cloudflared` executable that 
 - [Frontend adapter guide](docs/FRONTEND_ADAPTERS.md)
 - [Frontend runtime integration roadmap](docs/FRONTEND_RUNTIME_ROADMAP.md)
 - [Static delivery and middleware](docs/STATIC_AND_MIDDLEWARE.md)
+- [Manus Tunnel guide](docs/MANUS_TUNNEL.md)
 - [Threat model](docs/THREAT_MODEL.md)
 - [Release checklist](docs/RELEASE_CHECKLIST.md)
 
